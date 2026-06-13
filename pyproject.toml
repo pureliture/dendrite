@@ -10,6 +10,7 @@ dependencies = []
 
 [project.scripts]
 dendrite = "dendrite.cli:main"
+agy-headless-capture = "dendrite.agy_headless_capture:main"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
