@@ -110,6 +110,44 @@ def test_cli_transcript_capture_spools_stdin_payload_without_leaking_locator(tmp
     assert stored["source_locator"]["runtime_handle"] == str(transcript)
 
 
+def test_cli_transcript_capture_best_effort_kickstarts_after_spooling(tmp_path, monkeypatch, capsys):
+    transcript = tmp_path / "transcript.jsonl"
+    transcript.write_text("{}\n", encoding="utf-8")
+    payload = _antigravity_stop_payload(str(transcript))
+    calls = []
+
+    def fake_run(*args, **kwargs):
+        calls.append((args, kwargs))
+
+    monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps(payload)))
+    monkeypatch.setattr("dendrite.cli.subprocess.run", fake_run)
+
+    assert (
+        main(
+            [
+                "transcript-capture",
+                "--provider",
+                "antigravity",
+                "--project",
+                PROJECT,
+                "--spool",
+                str(tmp_path / "capture-spool"),
+                "--stdin-json",
+                "--kickstart-label",
+                "com.ragflow.agent-knowledge.transcript-ingest",
+            ]
+        )
+        == 0
+    )
+
+    output = json.loads(capsys.readouterr().out)
+    assert output["status"] == "spooled"
+    assert calls
+    argv = calls[0][0][0]
+    assert argv[:2] == ["launchctl", "kickstart"]
+    assert argv[2].endswith("/com.ragflow.agent-knowledge.transcript-ingest")
+
+
 def test_antigravity_capture_rejects_raw_transcript_content(tmp_path):
     transcript = tmp_path / "transcript.jsonl"
     transcript.write_text("{}\n", encoding="utf-8")
