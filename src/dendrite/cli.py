@@ -2,9 +2,15 @@ from __future__ import annotations
 
 from argparse import ArgumentParser
 import json
+import sys
 
 from . import __version__
 from .provider_contracts import build_provider_doctor_report, build_provider_hook_plan
+from .transcript_capture import (
+    TranscriptCaptureSpool,
+    has_workspace_path,
+    normalize_provider_capture_request,
+)
 
 
 def build_parser() -> ArgumentParser:
@@ -27,7 +33,71 @@ def build_parser() -> ArgumentParser:
     hook_plan.add_argument("--action", required=True, choices=["install", "uninstall"])
     hook_plan.add_argument("--project", default="<project>")
     hook_plan.add_argument("--capture-spool", default="<private-transcript-capture-spool>")
+    capture = subparsers.add_parser("transcript-capture", help="enqueue a provider locator-only capture request")
+    capture.add_argument("--provider", required=True, choices=["claude", "gemini", "codex", "antigravity"])
+    capture.add_argument("--project", required=True)
+    capture.add_argument("--spool", required=True)
+    capture.add_argument("--stdin-json", action="store_true", help="read provider hook payload JSON from stdin")
+    capture.add_argument("--non-fatal", action="store_true", help="return success after reporting capture errors")
+    capture.add_argument(
+        "--require-workspace-path",
+        action="store_true",
+        help="skip capture when provider payload has no usable workspace path",
+    )
     return parser
+
+
+def _capture_from_stdin(args) -> int:
+    if not args.stdin_json:
+        print(json.dumps({"status": "error", "error_class": "stdin_json_required"}, sort_keys=True))
+        return 0 if args.non_fatal else 2
+    try:
+        payload = json.load(sys.stdin)
+        if not isinstance(payload, dict):
+            raise ValueError("provider payload must be a JSON object")
+        if args.require_workspace_path and not has_workspace_path(payload):
+            print(
+                json.dumps(
+                    {
+                        "schema_version": "dendrite_transcript_capture_result.v1",
+                        "status": "skipped_no_workspace_path",
+                        "provider": args.provider,
+                    },
+                    sort_keys=True,
+                )
+            )
+            return 0
+        request = normalize_provider_capture_request(args.provider, payload, project=args.project)
+        path = TranscriptCaptureSpool(args.spool).enqueue(request)
+        source_locator = request.get("source_locator") or {}
+        print(
+            json.dumps(
+                {
+                    "schema_version": "dendrite_transcript_capture_result.v1",
+                    "status": "spooled",
+                    "request_id": request["request_id"],
+                    "provider": request["provider"],
+                    "project": request["project"],
+                    "event_type": request["event_type"],
+                    "source_locator_hash": source_locator.get("locator_hash", ""),
+                    "spool_file": str(path),
+                },
+                sort_keys=True,
+            )
+        )
+        return 0
+    except Exception as exc:
+        print(
+            json.dumps(
+                {
+                    "schema_version": "dendrite_transcript_capture_result.v1",
+                    "status": "capture_error",
+                    "error_class": exc.__class__.__name__,
+                },
+                sort_keys=True,
+            )
+        )
+        return 0 if args.non_fatal else 1
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -60,6 +130,9 @@ def main(argv: list[str] | None = None) -> int:
                 )
             )
             return 0
+
+    if args.command == "transcript-capture":
+        return _capture_from_stdin(args)
 
     parser.print_help()
     return 0

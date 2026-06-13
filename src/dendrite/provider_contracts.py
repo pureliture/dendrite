@@ -220,7 +220,7 @@ def build_provider_hook_plan(
     *,
     provider: str,
     action: str,
-    agent_knowledge_command: str = "dendrite",
+    dendrite_command: str = "dendrite",
     project: str = "<project>",
     capture_spool: str = "<private-transcript-capture-spool>",
 ) -> dict:
@@ -261,7 +261,7 @@ def build_provider_hook_plan(
             "rollback": {
                 "owner": "operator",
                 "steps": [
-                    f"agent-knowledge provider hook-plan --provider {provider} --action uninstall",
+                    f"dendrite provider hook-plan --provider {provider} --action uninstall",
                     "Do not install provider hooks until the source contract is verified.",
                 ],
             },
@@ -290,7 +290,7 @@ def build_provider_hook_plan(
             "rollback": {
                 "owner": "operator",
                 "steps": [
-                    f"agent-knowledge provider hook-plan --provider {provider} --action uninstall",
+                    f"dendrite provider hook-plan --provider {provider} --action uninstall",
                     "Do not install provider hooks until native parser readiness is approved.",
                 ],
             },
@@ -307,7 +307,7 @@ def build_provider_hook_plan(
         "exact_target": _exact_target(contract),
         "planned_argv": _planned_argv(
             contract,
-            agent_knowledge_command=agent_knowledge_command,
+            dendrite_command=dendrite_command,
             project=project,
             capture_spool=capture_spool,
         ),
@@ -317,14 +317,14 @@ def build_provider_hook_plan(
         **_provider_config_plan(
             contract,
             action=action,
-            agent_knowledge_command=agent_knowledge_command,
+            dendrite_command=dendrite_command,
             project=project,
             capture_spool=capture_spool,
         ),
         "rollback": {
             "owner": "operator",
             "steps": [
-                f"agent-knowledge provider hook-plan --provider {provider} --action {_opposite_action(action)}",
+                f"dendrite provider hook-plan --provider {provider} --action {_opposite_action(action)}",
                 "Review the generated non-mutating plan before any future provider config change.",
             ],
         },
@@ -397,12 +397,12 @@ def _exact_target(contract: ProviderSourceContract) -> str:
 def _planned_argv(
     contract: ProviderSourceContract,
     *,
-    agent_knowledge_command: str = "dendrite",
+    dendrite_command: str = "dendrite",
     project: str = "<project>",
     capture_spool: str = "<private-transcript-capture-spool>",
 ) -> list[str]:
     return [
-        agent_knowledge_command,
+        dendrite_command,
         "transcript-capture",
         "--provider",
         contract.provider,
@@ -419,7 +419,7 @@ def _provider_config_plan(
     contract: ProviderSourceContract,
     *,
     action: str,
-    agent_knowledge_command: str,
+    dendrite_command: str,
     project: str,
     capture_spool: str,
 ) -> dict:
@@ -427,7 +427,7 @@ def _provider_config_plan(
         return {}
     planned_argv = _planned_argv(
         contract,
-        agent_knowledge_command=agent_knowledge_command,
+        dendrite_command=dendrite_command,
         project=project,
         capture_spool=capture_spool,
     )
