@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from argparse import ArgumentParser
 import json
+import os
 from pathlib import Path
+import subprocess
 import sys
 
 from . import __version__
@@ -13,6 +15,16 @@ from .transcript_capture import (
     has_workspace_path,
     normalize_provider_capture_request,
 )
+
+
+def _best_effort_kickstart_launchagent(label: str) -> None:
+    subprocess.run(
+        ["launchctl", "kickstart", f"gui/{os.getuid()}/{label}"],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        timeout=2,
+        check=False,
+    )
 
 
 def build_parser() -> ArgumentParser:
@@ -50,6 +62,7 @@ def build_parser() -> ArgumentParser:
     capture.add_argument("--spool", required=True)
     capture.add_argument("--stdin-json", action="store_true", help="read provider hook payload JSON from stdin")
     capture.add_argument("--non-fatal", action="store_true", help="return success after reporting capture errors")
+    capture.add_argument("--kickstart-label", help="best-effort launchctl kickstart label after spooling")
     capture.add_argument(
         "--require-workspace-path",
         action="store_true",
@@ -129,6 +142,8 @@ def _capture_from_stdin(args) -> int:
             return 0
         request = normalize_provider_capture_request(args.provider, payload, project=args.project)
         path = TranscriptCaptureSpool(args.spool).enqueue(request)
+        if args.kickstart_label:
+            _best_effort_kickstart_launchagent(args.kickstart_label)
         source_locator = request.get("source_locator") or {}
         print(
             json.dumps(

@@ -36,7 +36,8 @@ surface는 다음과 같다.
 - `dendrite capture-fixture`: JSON fixture를 minimized local event로 spool
 - `dendrite capture`: stdin JSON을 minimized local event로 spool
 - `dendrite transcript-capture`: provider hook payload를 locator-only capture
-  request로 spool
+  request로 spool. `--kickstart-label`은 spool 이후 thin shipper LaunchAgent를
+  best-effort로 깨우기 위한 선택 옵션이다.
 - `agy-headless-capture`: headless Antigravity run을 실행한 뒤 launch-dir
   label과 transcript locator만 capture spool에 기록
 - `dendrite provider doctor`: provider source contract readiness 확인
