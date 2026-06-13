@@ -42,3 +42,7 @@ surface는 다음과 같다.
 `transcript_ingest.py`는 thin enqueue body/client seam만 담는다. server worker,
 ledger/state authority, direct RAGFlow writer, session-memory build/promote, brain
 query, native memory, GC safety는 `neurons` 책임이다.
+
+`tests/test_client_boundary.py` guards this boundary by rejecting imports from
+the historical `agent_knowledge` source monolith and server/brain authority
+symbols in `src/dendrite`.
