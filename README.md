@@ -29,5 +29,16 @@ uv run python -m dendrite --help
 
 ## Current Status
 
-이 저장소는 M1 bootstrap 상태다. 기능 코드는 아직
-`capabilities/agent-knowledge`에서 실제 thin seam 추출 전이다.
+이 저장소는 Mac thin-client seam을 이미 로컬로 보유한다. 현재 command
+surface는 다음과 같다.
+
+- `dendrite capture-fixture`: JSON fixture를 minimized local event로 spool
+- `dendrite capture`: stdin JSON을 minimized local event로 spool
+- `dendrite transcript-capture`: provider hook payload를 locator-only capture
+  request로 spool
+- `dendrite provider doctor`: provider source contract readiness 확인
+- `dendrite provider hook-plan`: non-mutating provider hook plan 출력
+
+`transcript_ingest.py`는 thin enqueue body/client seam만 담는다. server worker,
+ledger/state authority, direct RAGFlow writer, session-memory build/promote, brain
+query, native memory, GC safety는 `neurons` 책임이다.
