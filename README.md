@@ -25,6 +25,7 @@
 ```text
 uv run pytest -q
 uv run python -m dendrite --help
+uv run agy-headless-capture --print "your prompt"
 ```
 
 ## Current Status
@@ -36,6 +37,8 @@ surface는 다음과 같다.
 - `dendrite capture`: stdin JSON을 minimized local event로 spool
 - `dendrite transcript-capture`: provider hook payload를 locator-only capture
   request로 spool
+- `agy-headless-capture`: headless Antigravity run을 실행한 뒤 launch-dir
+  label과 transcript locator만 capture spool에 기록
 - `dendrite provider doctor`: provider source contract readiness 확인
 - `dendrite provider hook-plan`: non-mutating provider hook plan 출력
 
