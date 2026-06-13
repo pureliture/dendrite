@@ -1,4 +1,8 @@
+import io
+import json
+
 from dendrite.capture import capture_event
+from dendrite.cli import main
 from dendrite.events import EventValidationError, validate_event
 from dendrite.minimizer import minimize_event
 from dendrite.redaction import redact_text
@@ -106,6 +110,66 @@ def test_capture_event_writes_minimized_event_without_stdout_or_network(tmp_path
     assert path.parent == spool_dir / "pending"
     assert path.exists()
     assert "live-token-value" not in path.read_text()
+
+
+def test_cli_capture_fixture_spools_minimized_event_without_raw_text(tmp_path, capsys):
+    fixture = tmp_path / "event.json"
+    fixture.write_text(
+        json.dumps(
+            {
+                "provider": "codex",
+                "project": "workspace-ragflow-advisor",
+                "session_id": "session-123",
+                "event_type": "manual_note",
+                "text": "Keep this TOKEN=live-token-value",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    rc = main(["capture-fixture", "--fixture", str(fixture), "--spool", str(tmp_path / "spool")])
+
+    output = json.loads(capsys.readouterr().out)
+    stored = json.loads(next((tmp_path / "spool" / "pending").glob("*.json")).read_text(encoding="utf-8"))
+    assert rc == 0
+    assert output["status"] == "spooled"
+    assert output["provider"] == "codex"
+    assert "live-token-value" not in json.dumps(output)
+    assert "live-token-value" not in json.dumps(stored)
+
+
+def test_cli_capture_stdin_spools_minimized_event_with_provider_project(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(
+        "sys.stdin",
+        io.StringIO(
+            json.dumps(
+                {
+                    "session_id": "session-abc",
+                    "event_type": "session_end",
+                    "summary": "Session ended without raw prompt.",
+                }
+            )
+        ),
+    )
+
+    rc = main([
+        "capture",
+        "--provider",
+        "claude",
+        "--project",
+        "workspace-ragflow-advisor",
+        "--spool",
+        str(tmp_path / "spool"),
+        "--stdin-json",
+    ])
+
+    output = json.loads(capsys.readouterr().out)
+    stored = json.loads(next((tmp_path / "spool" / "pending").glob("*.json")).read_text(encoding="utf-8"))
+    assert rc == 0
+    assert output["provider"] == "claude"
+    assert output["project"] == "workspace-ragflow-advisor"
+    assert stored["provider"] == "claude"
+    assert stored["project"] == "workspace-ragflow-advisor"
 
 
 def test_minimizer_uses_private_dedupe_key_without_persisting_it():
