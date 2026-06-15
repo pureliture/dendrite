@@ -9,6 +9,7 @@ from pathlib import Path
 from time import time
 
 from .redaction import redact_text_v2
+from .spool import JsonFileSpool
 
 CAPTURE_SCHEMA_VERSION = "agent_knowledge_capture_request.v1"
 MAX_LOCATOR_CHARS = 4096
@@ -304,62 +305,22 @@ class TranscriptCaptureSpool:
     SUBDIRS = ("pending", "processing", "acked", "quarantine")
 
     def __init__(self, root: Path | str):
-        self.root = Path(root)
-        if self.root.is_symlink():
-            raise ValueError("capture spool root must not be a symlink")
-        self.root.mkdir(mode=0o700, parents=True, exist_ok=True)
-        os.chmod(self.root, 0o700)
-        for subdir in self.SUBDIRS:
-            path = self.root / subdir
-            if path.is_symlink():
-                raise ValueError(f"capture spool subdirectory must not be a symlink: {subdir}")
-            path.mkdir(mode=0o700, exist_ok=True)
-            os.chmod(path, 0o700)
+        self._spool = JsonFileSpool(root, subdirs=self.SUBDIRS, root_label="capture spool")
+        self.root = self._spool.root
 
     def enqueue(self, request: dict) -> Path:
         validate_capture_request(request)
         name = f"{request['request_id']}.json"
-        existing = self._find_existing(name)
-        if existing is not None:
-            return existing
-        final_path = self.root / "pending" / name
-        temp_path = self.root / "pending" / f".{name}.tmp"
-        fd = os.open(temp_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8") as handle:
-                json.dump(request, handle, sort_keys=True)
-                handle.write("\n")
-                handle.flush()
-                os.fsync(handle.fileno())
-            os.chmod(temp_path, 0o600)
-            os.replace(temp_path, final_path)
-            os.chmod(final_path, 0o600)
-        except Exception:
-            temp_path.unlink(missing_ok=True)
-            raise
-        return final_path
+        return self._spool.write_json_once(name, request)
 
     def _find_existing(self, name: str) -> Path | None:
-        for subdir in self.SUBDIRS:
-            candidate = self.root / subdir / name
-            if candidate.exists():
-                return candidate
-        return None
+        return self._spool.find_existing(name)
 
     def claim_next(self) -> Path:
-        pending = sorted((self.root / "pending").glob("*.json"))
-        if not pending:
-            raise FileNotFoundError("no pending transcript capture requests")
-        source = pending[0]
-        target = self.root / "processing" / source.name
-        os.replace(source, target)
-        return target
+        return self._spool.claim_next(empty_message="no pending transcript capture requests")
 
     def ack(self, processing_path: Path | str) -> Path:
-        source = Path(processing_path)
-        target = self.root / "acked" / source.name
-        os.replace(source, target)
-        return target
+        return self._spool.ack(processing_path)
 
     def quarantine(self, processing_path: Path | str) -> Path:
         return self.quarantine_with_failure(processing_path)
@@ -369,10 +330,8 @@ class TranscriptCaptureSpool:
         if failure is not None:
             request = json.loads(source.read_text(encoding="utf-8"))
             request["last_failure"] = dict(failure)
-            _write_private_json(source, request)
-        target = self.root / "quarantine" / source.name
-        os.replace(source, target)
-        return target
+            self._spool.replace_json(source, request)
+        return self._spool.move_to(source, "quarantine")
 
     def requeue_recoverable_quarantine(self, *, max_items: int = 1, max_attempts: int = MAX_QUARANTINE_RETRY_ATTEMPTS) -> int:
         moved = 0
@@ -389,11 +348,11 @@ class TranscriptCaptureSpool:
             recovery["retry_attempts"] = int(recovery.get("retry_attempts") or 0) + 1
             recovery["last_requeued_at"] = datetime.now(timezone.utc).isoformat()
             request["recovery"] = recovery
-            _write_private_json(source, request)
+            self._spool.replace_json(source, request)
             target = self.root / "pending" / source.name
             if target.exists():
                 continue
-            os.replace(source, target)
+            self._spool.move_to(source, "pending")
             moved += 1
         return moved
 
@@ -408,12 +367,12 @@ class TranscriptCaptureSpool:
             target = self.root / "pending" / source.name
             if target.exists():
                 continue
-            os.replace(source, target)
+            self._spool.move_to(source, "pending")
             moved += 1
         return moved
 
     def depth_counts(self) -> dict[str, int]:
-        return {subdir: len(list((self.root / subdir).glob("*.json"))) for subdir in self.SUBDIRS}
+        return self._spool.depth_counts()
 
 
 def _is_recoverable_quarantine_request(request: dict, *, max_attempts: int) -> bool:
@@ -434,20 +393,3 @@ def _is_recoverable_quarantine_request(request: dict, *, max_attempts: int) -> b
     except (TypeError, ValueError):
         retry_attempts = 0
     return retry_attempts < max_attempts
-
-
-def _write_private_json(path: Path, payload: dict) -> None:
-    temp_path = path.with_name(f".{path.name}.tmp")
-    fd = os.open(temp_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
-            json.dump(payload, handle, sort_keys=True)
-            handle.write("\n")
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.chmod(temp_path, 0o600)
-        os.replace(temp_path, path)
-        os.chmod(path, 0o600)
-    except Exception:
-        temp_path.unlink(missing_ok=True)
-        raise
