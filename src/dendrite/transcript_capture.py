@@ -24,6 +24,15 @@ RAW_TRANSCRIPT_FIELDS = {
 SUPPORTED_TRANSCRIPT_PROVIDERS = {"claude", "gemini", "codex", "antigravity"}
 SOURCE_UNPROVEN_PROVIDERS: set[str] = set()
 CODEX_SESSION_ID_PATTERN = re.compile(r"^[A-Za-z0-9_.:-]{8,160}$")
+PROJECT_SOURCE_PATH_KEYS = (
+    "workspacePath",
+    "workspace_path",
+    "cwd",
+    "currentWorkingDirectory",
+    "current_working_directory",
+    "workingDirectory",
+    "working_directory",
+)
 MAX_QUARANTINE_RETRY_ATTEMPTS = 3
 NON_RECOVERABLE_FAILURE_CLASSES = {
     "source_parse_failed",
@@ -87,17 +96,59 @@ def _now_iso() -> str:
 
 
 def _first_workspace_path(payload: dict) -> str:
-    """Return the first non-blank session workspace path from a hook payload, or ""."""
-    paths = payload.get("workspacePaths")
-    if isinstance(paths, list) and paths:
-        first = str(paths[0] or "").strip().rstrip("/")
-        if first:
-            return first
+    """Return the first usable session workspace/cwd path from a hook payload."""
+    for path in _iter_project_source_paths(payload):
+        return path
     return ""
 
 
+def _iter_project_source_paths(payload: dict):
+    paths = payload.get("workspacePaths")
+    if isinstance(paths, list):
+        for path in paths:
+            usable = _usable_project_source_path(path)
+            if usable:
+                yield usable
+    for key in PROJECT_SOURCE_PATH_KEYS:
+        usable = _usable_project_source_path(payload.get(key))
+        if usable:
+            yield usable
+
+
+def _usable_project_source_path(value) -> str:
+    if not isinstance(value, str):
+        return ""
+    candidate = value.strip().rstrip("/")
+    if not candidate or _looks_like_provider_storage_path(candidate):
+        return ""
+    return candidate
+
+
+def _looks_like_provider_storage_path(value: str) -> bool:
+    parts = [part.lower() for part in value.replace("\\", "/").split("/") if part]
+    if _contains_subsequence(parts, [".codex", "sessions"]):
+        return True
+    if _contains_subsequence(parts, [".claude", "projects"]):
+        return True
+    if _contains_subsequence(parts, [".gemini", "antigravity-cli", "brain"]):
+        return True
+    return ".system_generated" in parts
+
+
+def _contains_subsequence(parts: list[str], needle: list[str]) -> bool:
+    if not needle:
+        return True
+    position = 0
+    for part in parts:
+        if part == needle[position]:
+            position += 1
+            if position == len(needle):
+                return True
+    return False
+
+
 def has_workspace_path(payload: dict) -> bool:
-    """True when the payload carries a usable session workspace path.
+    """True when the payload carries a usable session workspace/cwd path.
 
     Interactive agy Stop payloads carry it; headless ``agy --print`` sends an empty
     ``workspacePaths``. The global Stop hook uses this (via --require-workspace-path)
@@ -111,9 +162,9 @@ def _resolve_project(payload: dict, fallback: str) -> str:
 
     CLI surfaces (e.g. Antigravity `agy`) run in arbitrary directories but share a
     single global Stop hook, so a hardcoded ``--project`` would mislabel every
-    session launched outside the advisor workspace. When the hook payload carries
-    the session workspace path, use its basename; otherwise fall back to the
-    operator-provided ``--project``.
+    session launched outside the advisor workspace. When the hook payload carries a
+    session workspace/cwd path, use it; otherwise fall back to the operator-provided
+    ``--project``.
     """
     first = _first_workspace_path(payload)
     if first:

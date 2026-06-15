@@ -35,6 +35,7 @@ def test_readme_describes_extracted_thin_client_surface() -> None:
         "dendrite capture-fixture",
         "dendrite capture",
         "dendrite transcript-capture",
+        "dendrite transcript-drain",
         "agy-headless-capture",
         "dendrite provider doctor",
         "dendrite provider hook-plan",
