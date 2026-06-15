@@ -15,6 +15,8 @@ from .transcript_capture import (
     has_workspace_path,
     normalize_provider_capture_request,
 )
+from .transcript_drain import drain_transcript_spool_once
+from .transcript_ingest import IngressQueueClient
 
 
 def _best_effort_kickstart_launchagent(label: str) -> None:
@@ -68,6 +70,17 @@ def build_parser() -> ArgumentParser:
         action="store_true",
         help="skip capture when provider payload has no usable workspace path",
     )
+    drain = subparsers.add_parser("transcript-drain", help="drain locator-only transcript capture spool to ingress")
+    drain.add_argument("--once", action="store_true", help="run one bounded drain tick")
+    drain.add_argument("--capture-spool", required=True)
+    drain.add_argument("--ingress-url", required=True)
+    drain.add_argument("--target-profile", default="ragflow-transcript-memory")
+    drain.add_argument("--max-items", type=int, default=5)
+    drain.add_argument("--timeout-seconds", type=float, default=10.0)
+    drain.add_argument("--requeue-recoverable-quarantine", action="store_true")
+    drain.add_argument("--runtime-dir", default="")
+    drain.add_argument("--scheduler-id", default="")
+    drain.add_argument("--scheduler-command-kind", default="")
     return parser
 
 
@@ -214,6 +227,20 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "transcript-capture":
         return _capture_from_stdin(args)
+
+    if args.command == "transcript-drain":
+        if not args.once:
+            print(json.dumps({"status": "error", "error_class": "once_required"}, sort_keys=True))
+            return 2
+        report = drain_transcript_spool_once(
+            capture_spool=TranscriptCaptureSpool(args.capture_spool),
+            ingress=IngressQueueClient(base_url=args.ingress_url, timeout_seconds=args.timeout_seconds),
+            target_profile=args.target_profile,
+            max_items=args.max_items,
+            requeue_recoverable_quarantine=args.requeue_recoverable_quarantine,
+        )
+        print(json.dumps(report, sort_keys=True))
+        return 0 if report["status"] in {"idle", "queued", "requeued"} else 1
 
     parser.print_help()
     return 0
