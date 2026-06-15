@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -9,6 +8,7 @@ from dataclasses import dataclass
 from hashlib import sha256
 from pathlib import Path
 
+from ..spool import JsonFileSpool
 from .rag_ready_document import DEFAULT_INGRESS_PAYLOAD_KIND, assert_no_secret_like_metadata
 
 
@@ -78,47 +78,24 @@ class FileBackedIngressOutbox:
     SUBDIRS = ("pending", "acked", "quarantine")
 
     def __init__(self, root: Path | str):
-        self.root = Path(root)
-        if self.root.is_symlink():
-            raise ValueError("outbox root must not be a symlink")
-        self.root.mkdir(mode=0o700, parents=True, exist_ok=True)
-        os.chmod(self.root, 0o700)
-        for subdir in self.SUBDIRS:
-            path = self.root / subdir
-            if path.is_symlink():
-                raise ValueError(f"outbox subdirectory must not be a symlink: {subdir}")
-            path.mkdir(mode=0o700, exist_ok=True)
-            os.chmod(path, 0o700)
+        self._spool = JsonFileSpool(root, subdirs=self.SUBDIRS, root_label="outbox")
+        self.root = self._spool.root
 
     def enqueue(self, payload: dict) -> OutboxItem:
         validate_outbox_payload(payload)
         item_id = outbox_item_id(payload)
         filename = f"{item_id}.json"
-        existing = self._find_existing(filename)
+        existing = self._spool.find_existing(filename)
         if existing is not None:
             return OutboxItem(item_id=item_id, path=existing, status=_status_for_path(existing))
-        final_path = self.root / "pending" / filename
-        temp_path = self.root / "pending" / f".{filename}.tmp"
-        fd = os.open(temp_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8") as handle:
-                json.dump(payload, handle, sort_keys=True, separators=(",", ":"))
-                handle.write("\n")
-                handle.flush()
-                os.fsync(handle.fileno())
-            os.chmod(temp_path, 0o600)
-            os.replace(temp_path, final_path)
-            os.chmod(final_path, 0o600)
-        except Exception:
-            temp_path.unlink(missing_ok=True)
-            raise
+        final_path = self._spool.write_json_once(filename, payload, separators=(",", ":"))
         return OutboxItem(item_id=item_id, path=final_path, status="pending")
 
     def flush(self, client: RagIngressHttpClient, *, limit: int = 50) -> dict:
         sent = 0
         quarantined = 0
         stopped = False
-        for path in sorted((self.root / "pending").glob("*.json"))[: max(int(limit), 1)]:
+        for path in self._spool.files("pending")[: max(int(limit), 1)]:
             try:
                 payload = json.loads(path.read_text(encoding="utf-8"))
                 validate_outbox_payload(payload)
@@ -127,10 +104,10 @@ class FileBackedIngressOutbox:
                 stopped = True
                 break
             except (IngressEnqueueRejected, ValueError, json.JSONDecodeError, UnicodeDecodeError):
-                self._move(path, "quarantine")
+                self._spool.move_to(path, "quarantine")
                 quarantined += 1
             else:
-                self._move(path, "acked")
+                self._spool.move_to(path, "acked")
                 sent += 1
         counts = self.depth_counts()
         return {
@@ -143,20 +120,13 @@ class FileBackedIngressOutbox:
         }
 
     def depth_counts(self) -> dict[str, int]:
-        return {subdir: len(list((self.root / subdir).glob("*.json"))) for subdir in self.SUBDIRS}
+        return self._spool.depth_counts()
 
     def _find_existing(self, filename: str) -> Path | None:
-        for subdir in self.SUBDIRS:
-            candidate = self.root / subdir / filename
-            if candidate.exists():
-                return candidate
-        return None
+        return self._spool.find_existing(filename)
 
     def _move(self, source: Path, subdir: str) -> Path:
-        target = self.root / subdir / source.name
-        os.replace(source, target)
-        os.chmod(target, 0o600)
-        return target
+        return self._spool.move_to(source, subdir)
 
 
 def validate_outbox_payload(payload: dict) -> dict:
