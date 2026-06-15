@@ -30,7 +30,7 @@ AUTHORIZATION_TERM_RE = re.compile(r"\bAuthorization\b", re.IGNORECASE)
 API_KEY_TERM_RE = re.compile(r"\bapi[_-]?key[A-Za-z0-9_-]*\b|\bapiKey[A-Za-z0-9_-]*\b", re.IGNORECASE)
 ACCESS_TOKEN_TERM_RE = re.compile(r"\baccess[_-]?token[A-Za-z0-9_-]*\b|\btoken\b", re.IGNORECASE)
 SECRET_ASSIGNMENT_RE = re.compile(
-    r"\b(?:export\s+)?[A-Z0-9_]*(TOKEN|SECRET|API_KEY|PASSWORD|PASSWD)\b\s*[:=]\s*(\"[^\"]*\"|'[^']*'|[^ \n\t,'\"}]+)",
+    r"\b(?:export\s+)?[A-Z0-9_]*(TOKEN|SECRET|API[_-]?KEY|PASSWORD|PASSWD)[A-Z0-9_]*\b\s*[:=]\s*(\"[^\"]*\"|'[^']*'|[^ \n\t,'\"}]+)",
     re.IGNORECASE,
 )
 BEARER_RE = re.compile(r"Bearer\s+[A-Za-z0-9][A-Za-z0-9._-]{8,}", re.IGNORECASE)

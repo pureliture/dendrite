@@ -38,6 +38,8 @@ surface는 다음과 같다.
 - `dendrite transcript-capture`: provider hook payload를 locator-only capture
   request로 spool. `--kickstart-label`은 spool 이후 thin shipper LaunchAgent를
   best-effort로 깨우기 위한 선택 옵션이다.
+- `dendrite transcript-drain`: capture spool의 locator request를 bounded tick으로
+  읽어 redacted enqueue payload를 `POST 18080` ingress queue로 전달한다.
 - `agy-headless-capture`: headless Antigravity run을 실행한 뒤 launch-dir
   label과 transcript locator만 capture spool에 기록
 - `dendrite provider doctor`: provider source contract readiness 확인
