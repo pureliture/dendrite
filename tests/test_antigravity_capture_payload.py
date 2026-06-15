@@ -243,6 +243,83 @@ def test_project_derived_from_cli_workspace_path(tmp_path):
     assert request["public_summary"]["project"] == "my-cli-project"
 
 
+def test_project_derived_from_scalar_workspace_path_before_fallback(tmp_path):
+    transcript = tmp_path / "transcript.jsonl"
+    transcript.write_text("{}\n", encoding="utf-8")
+    payload = _antigravity_stop_payload(str(transcript))
+    payload.pop("workspacePaths", None)
+    payload["workspacePath"] = "/Users/ddalkak/Projects/neurons"
+
+    request = normalize_provider_capture_request("codex", payload, project=PROJECT)
+
+    assert request["project"] == "neurons"
+    assert request["public_summary"]["project"] == "neurons"
+
+
+def test_codex_project_derived_from_cwd_before_hardcoded_fallback(tmp_path):
+    transcript = tmp_path / "codex-session.jsonl"
+    transcript.write_text("{}\n", encoding="utf-8")
+    payload = {
+        "hook_event_name": "Stop",
+        "session_id": "codex-session-123",
+        "transcript_path": str(transcript),
+        "cwd": "/Users/ddalkak/Projects/neurons",
+    }
+
+    request = normalize_provider_capture_request("codex", payload, project=PROJECT)
+
+    assert request["project"] == "neurons"
+    assert request["public_summary"]["project"] == "neurons"
+
+
+def test_codex_project_derived_from_worktree_cwd_uses_repo_slug(tmp_path):
+    transcript = tmp_path / "codex-session.jsonl"
+    transcript.write_text("{}\n", encoding="utf-8")
+    payload = {
+        "hook_event_name": "Stop",
+        "session_id": "codex-session-123",
+        "transcript_path": str(transcript),
+        "currentWorkingDirectory": "/Users/ddalkak/Projects/neurons/.worktrees/transcript-capture-recovery",
+    }
+
+    request = normalize_provider_capture_request("codex", payload, project=PROJECT)
+
+    assert request["project"] == "neurons"
+    assert request["public_summary"]["project"] == "neurons"
+
+
+def test_provider_storage_path_is_not_used_as_project_slug(tmp_path):
+    transcript = tmp_path / "codex-session.jsonl"
+    transcript.write_text("{}\n", encoding="utf-8")
+    payload = {
+        "hook_event_name": "Stop",
+        "session_id": "codex-session-123",
+        "transcript_path": str(transcript),
+        "workspacePaths": ["/Users/ddalkak/.codex/sessions/2026/06/02"],
+    }
+
+    request = normalize_provider_capture_request("codex", payload, project=PROJECT)
+
+    assert request["project"] == PROJECT
+    assert request["project"] != "02"
+
+
+def test_provider_storage_path_does_not_override_valid_cwd(tmp_path):
+    transcript = tmp_path / "codex-session.jsonl"
+    transcript.write_text("{}\n", encoding="utf-8")
+    payload = {
+        "hook_event_name": "Stop",
+        "session_id": "codex-session-123",
+        "transcript_path": str(transcript),
+        "workspacePaths": ["/Users/ddalkak/.gemini/antigravity-cli/brain/session/.system_generated/logs"],
+        "workingDirectory": "/Users/ddalkak/Projects/neurons",
+    }
+
+    request = normalize_provider_capture_request("codex", payload, project=PROJECT)
+
+    assert request["project"] == "neurons"
+
+
 def test_project_derived_from_cli_worktree_path_uses_repo_slug(tmp_path):
     transcript = tmp_path / "transcript.jsonl"
     transcript.write_text("{}\n", encoding="utf-8")
@@ -299,6 +376,7 @@ def test_antigravity_capture_observed_at_preserves_explicit_value(tmp_path):
 def test_has_workspace_path_true_when_present():
     # Interactive agy Stop payloads carry the workspace; the global hook should capture.
     assert has_workspace_path({"workspacePaths": ["/Users/ddalkak/Projects/foo"]}) is True
+    assert has_workspace_path({"cwd": "/Users/ddalkak/Projects/neurons"}) is True
 
 
 def test_has_workspace_path_false_when_empty_or_absent():
@@ -308,6 +386,7 @@ def test_has_workspace_path_false_when_empty_or_absent():
     assert has_workspace_path({}) is False
     assert has_workspace_path({"workspacePaths": [""]}) is False
     assert has_workspace_path({"workspacePaths": ["   "]}) is False
+    assert has_workspace_path({"workspacePaths": ["/Users/ddalkak/.codex/sessions/2026/06/02"]}) is False
 
 
 def test_antigravity_legacy_normalizer_maps_stop_payload_to_session_end():
