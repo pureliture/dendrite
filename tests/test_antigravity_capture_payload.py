@@ -14,7 +14,7 @@ from dendrite.transcript_capture import (
 )
 from dendrite.providers.contracts import normalize_provider_event
 
-PROJECT = "workspace-ragflow-advisor"
+PROJECT = "dendrite"
 CONVERSATION_ID = "ffeb1faf-78d2-4c12-803e-684d6148b1ec"
 
 
@@ -30,7 +30,7 @@ def _antigravity_stop_payload(transcript_path: str) -> dict:
         "error": "",
         "fullyIdle": True,
         "conversationId": CONVERSATION_ID,
-        "workspacePaths": ["/Users/ddalkak/.openclaw/workspace-ragflow-advisor"],
+        "workspacePaths": ["/Users/ddalkak/Projects/dendrite"],
         "transcriptPath": transcript_path,
         "artifactDirectoryPath": "/tmp/antigravity-artifacts",
     }
@@ -230,7 +230,7 @@ def test_antigravity_stop_payload_identifies_session_from_conversation_id(tmp_pa
 
 
 def test_project_derived_from_cli_workspace_path(tmp_path):
-    # A CLI session launched outside the advisor workspace must be labelled by its own
+    # A CLI session launched outside the fallback workspace must be labelled by its own
     # workspace directory, not the hardcoded --project fallback baked into the hook.
     transcript = tmp_path / "transcript.jsonl"
     transcript.write_text("{}\n", encoding="utf-8")
