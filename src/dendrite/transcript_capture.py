@@ -162,7 +162,7 @@ def _resolve_project(payload: dict, fallback: str) -> str:
 
     CLI surfaces (e.g. Antigravity `agy`) run in arbitrary directories but share a
     single global Stop hook, so a hardcoded ``--project`` would mislabel every
-    session launched outside the advisor workspace. When the hook payload carries a
+    session launched outside the configured fallback workspace. When the hook payload carries a
     session workspace/cwd path, use it; otherwise fall back to the operator-provided
     ``--project``.
     """
