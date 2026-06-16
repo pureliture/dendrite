@@ -17,6 +17,7 @@ from .transcript_capture import (
 )
 from .transcript_drain import drain_transcript_spool_once
 from .transcript_ingest import IngressQueueClient
+from .transcript_migrate import MIGRATION_PROVIDERS, migrate, parse_source_root_overrides
 
 
 def _best_effort_kickstart_launchagent(label: str) -> None:
@@ -81,6 +82,20 @@ def build_parser() -> ArgumentParser:
     drain.add_argument("--runtime-dir", default="")
     drain.add_argument("--scheduler-id", default="")
     drain.add_argument("--scheduler-command-kind", default="")
+    migrate_cmd = subparsers.add_parser(
+        "transcript-migrate",
+        help="bulk-spool locator-only capture requests for all historical provider sessions",
+    )
+    migrate_cmd.add_argument("--spool", required=True)
+    migrate_cmd.add_argument("--project", default="", help="fallback project label; neurons re-resolves authority")
+    migrate_cmd.add_argument(
+        "--provider", action="append", choices=list(MIGRATION_PROVIDERS), help="limit to provider(s); repeatable"
+    )
+    migrate_cmd.add_argument(
+        "--source-root", action="append", help="override a provider source root as provider=/path; repeatable"
+    )
+    migrate_cmd.add_argument("--limit", type=int, help="max sessions per provider (smoke runs)")
+    migrate_cmd.add_argument("--dry-run", action="store_true", help="enumerate and count without spooling")
     return parser
 
 
@@ -188,6 +203,33 @@ def _capture_from_stdin(args) -> int:
         return 0 if args.non_fatal else 1
 
 
+def _transcript_migrate(args) -> int:
+    try:
+        roots = parse_source_root_overrides(args.source_root)
+        report = migrate(
+            spool_root=args.spool,
+            roots=roots,
+            project=args.project,
+            providers=args.provider,
+            limit=args.limit,
+            dry_run=args.dry_run,
+        )
+        print(json.dumps(report, sort_keys=True))
+        return 0
+    except Exception as exc:
+        print(
+            json.dumps(
+                {
+                    "schema_version": "dendrite_transcript_migrate_result.v1",
+                    "status": "migrate_error",
+                    "error_class": exc.__class__.__name__,
+                },
+                sort_keys=True,
+            )
+        )
+        return 1
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -227,6 +269,9 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "transcript-capture":
         return _capture_from_stdin(args)
+
+    if args.command == "transcript-migrate":
+        return _transcript_migrate(args)
 
     if args.command == "transcript-drain":
         if not args.once:
