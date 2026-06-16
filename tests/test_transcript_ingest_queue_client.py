@@ -35,7 +35,7 @@ def test_ingress_queue_client_posts_versioned_redacted_contract(monkeypatch) -> 
         "result_type": "conversation_chunk",
         "knowledge_id": "kn_123",
         "provider": "claude",
-        "project": "workspace-ragflow-advisor",
+        "project": "dendrite",
         "turn_start_index": 1,
         "turn_end_index": 2,
     }
@@ -46,7 +46,7 @@ def test_ingress_queue_client_posts_versioned_redacted_contract(monkeypatch) -> 
             "host": "mac_mini",
             "producer": "session-compactor",
             "provider": "claude",
-            "project": "workspace-ragflow-advisor",
+            "project": "dendrite",
         },
         packed=SimpleNamespace(filename="chunk.md", body=body, metadata=metadata),
         content_hash=content_hash,
@@ -66,7 +66,7 @@ def test_ingress_queue_client_posts_versioned_redacted_contract(monkeypatch) -> 
         "host": "mac_mini",
         "producer": "session-compactor",
         "provider": "claude",
-        "project": "workspace-ragflow-advisor",
+        "project": "dendrite",
     }
     assert payload["payload"]["kind"] == "redacted_rag_ready_document"
     assert payload["payload"]["redactionVersion"] == "redaction.v2"

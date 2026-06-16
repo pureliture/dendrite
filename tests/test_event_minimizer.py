@@ -33,8 +33,8 @@ def test_redaction_removes_quoted_secret_assignments():
 def test_minimizer_keeps_manual_note_bounded_and_redacted():
     raw = {
         "provider": "codex",
-        "project": "workspace-ragflow-advisor",
-        "cwd": "/Users/ddalkak/.openclaw/workspace-ragflow-advisor",
+        "project": "dendrite",
+        "cwd": "/Users/ddalkak/Projects/dendrite",
         "session_id": "session-123",
         "event_type": "manual_note",
         "text": "Remember this. TOKEN=live-token-value",
@@ -52,7 +52,7 @@ def test_minimizer_keeps_manual_note_bounded_and_redacted():
 def test_minimizer_hashes_prompt_events_without_persisting_raw_prompt():
     raw = {
         "provider": "claude",
-        "project": "workspace-ragflow-advisor",
+        "project": "dendrite",
         "session_id": "session-abc",
         "event_type": "user_prompt_seen",
         "prompt": "Here is a sensitive prompt with TOKEN=live-token-value",
@@ -71,7 +71,7 @@ def test_validate_event_rejects_raw_payload_fields():
         "schema_version": "agent_knowledge_event.v1",
         "event_id": "evt_bad",
         "provider": "codex",
-        "project": "workspace-ragflow-advisor",
+        "project": "dendrite",
         "session_id_hash": "sha256:abc",
         "event_type": "manual_note",
         "observed_at": "2026-05-09T12:00:00+09:00",
@@ -96,7 +96,7 @@ def test_capture_event_writes_minimized_event_without_stdout_or_network(tmp_path
     path = capture_event(
         {
             "provider": "codex",
-            "project": "workspace-ragflow-advisor",
+            "project": "dendrite",
             "session_id": "session-123",
             "event_type": "session_end",
             "text": "Session summary TOKEN=live-token-value",
@@ -118,7 +118,7 @@ def test_cli_capture_fixture_spools_minimized_event_without_raw_text(tmp_path, c
         json.dumps(
             {
                 "provider": "codex",
-                "project": "workspace-ragflow-advisor",
+                "project": "dendrite",
                 "session_id": "session-123",
                 "event_type": "manual_note",
                 "text": "Keep this TOKEN=live-token-value",
@@ -157,7 +157,7 @@ def test_cli_capture_stdin_spools_minimized_event_with_provider_project(tmp_path
         "--provider",
         "claude",
         "--project",
-        "workspace-ragflow-advisor",
+        "dendrite",
         "--spool",
         str(tmp_path / "spool"),
         "--stdin-json",
@@ -167,15 +167,15 @@ def test_cli_capture_stdin_spools_minimized_event_with_provider_project(tmp_path
     stored = json.loads(next((tmp_path / "spool" / "pending").glob("*.json")).read_text(encoding="utf-8"))
     assert rc == 0
     assert output["provider"] == "claude"
-    assert output["project"] == "workspace-ragflow-advisor"
+    assert output["project"] == "dendrite"
     assert stored["provider"] == "claude"
-    assert stored["project"] == "workspace-ragflow-advisor"
+    assert stored["project"] == "dendrite"
 
 
 def test_minimizer_uses_private_dedupe_key_without_persisting_it():
     raw = {
         "provider": "gemini",
-        "project": "workspace-ragflow-advisor",
+        "project": "dendrite",
         "session_id": "session-123",
         "event_type": "session_end",
         "summary": "Gemini SessionEnd hook observed without prompt, context, tool, or model mutation.",

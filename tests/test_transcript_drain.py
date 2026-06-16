@@ -16,7 +16,7 @@ def _capture_request(source, *, project: str = "neurons") -> dict:
             "transcript_path": str(source),
             "cwd": f"/Users/ddalkak/Projects/{project}",
         },
-        project="workspace-ragflow-advisor",
+        project="dendrite",
     )
 
 
