@@ -19,15 +19,15 @@ def _payload():
         target_profile="transcript-memory",
         document_kind="conversation_chunk",
         source_namespace="codex",
-        source_alias="workspace-ragflow-advisor/session",
+        source_alias="dendrite/session",
         privacy_class="private",
         body="# Outbox\n\nbounded client outbox document",
         filename="outbox.md",
-        metadata={"project": "workspace-ragflow-advisor", "privacy_class": "private"},
+        metadata={"project": "dendrite", "privacy_class": "private"},
     )
     return build_ingress_enqueue_payload(
         document,
-        source={"provider": "codex", "source_alias": "workspace-ragflow-advisor/session"},
+        source={"provider": "codex", "source_alias": "dendrite/session"},
     )
 
 
