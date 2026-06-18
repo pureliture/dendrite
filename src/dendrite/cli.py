@@ -10,6 +10,7 @@ import sys
 from . import __version__
 from .capture import capture_event
 from .provider_contracts import build_provider_doctor_report, build_provider_hook_plan
+from .source_catalog import resolve_source_ref, scan_source_catalog
 from .transcript_capture import (
     TranscriptCaptureSpool,
     has_workspace_path,
@@ -96,6 +97,24 @@ def build_parser() -> ArgumentParser:
     )
     migrate_cmd.add_argument("--limit", type=int, help="max sessions per provider (smoke runs)")
     migrate_cmd.add_argument("--dry-run", action="store_true", help="enumerate and count without spooling")
+    source_catalog = subparsers.add_parser("source-catalog", help="local SourceRef catalog utilities")
+    source_subparsers = source_catalog.add_subparsers(dest="source_catalog_command")
+    source_scan = source_subparsers.add_parser("scan", help="write public SourceRef metadata and a private local index")
+    source_scan.add_argument("--root", required=True)
+    source_scan.add_argument("--root-id", required=True)
+    source_scan.add_argument("--device-id", required=True)
+    source_scan.add_argument("--public-out", required=True)
+    source_scan.add_argument("--private-index", required=True)
+    source_scan.add_argument("--sync-policy", default="metadata_only")
+    source_scan.add_argument("--permission-scope", default="project")
+    source_scan.add_argument("--limit", type=int)
+    source_resolve = source_subparsers.add_parser("resolve", help="resolve a SourceRef from the private same-device index")
+    source_resolve.add_argument("--private-index", required=True)
+    source_resolve.add_argument("--source-ref-id", required=True)
+    source_resolve.add_argument("--requesting-device-id", required=True)
+    source_resolve.add_argument("--approval-ref", default="")
+    source_resolve.add_argument("--expected-content-hash", default="")
+    source_resolve.add_argument("--max-bytes", type=int, default=4096)
     return parser
 
 
@@ -272,6 +291,32 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "transcript-migrate":
         return _transcript_migrate(args)
+
+    if args.command == "source-catalog":
+        if args.source_catalog_command == "scan":
+            report = scan_source_catalog(
+                root=args.root,
+                root_id=args.root_id,
+                device_id=args.device_id,
+                public_out=args.public_out,
+                private_index=args.private_index,
+                sync_policy=args.sync_policy,
+                permission_scope=args.permission_scope,
+                limit=args.limit,
+            )
+            print(json.dumps(report, sort_keys=True))
+            return 0
+        if args.source_catalog_command == "resolve":
+            report = resolve_source_ref(
+                private_index=args.private_index,
+                source_ref_id=args.source_ref_id,
+                requesting_device_id=args.requesting_device_id,
+                approval_ref=args.approval_ref,
+                expected_content_hash=args.expected_content_hash,
+                max_bytes=args.max_bytes,
+            )
+            print(json.dumps(report, sort_keys=True))
+            return 0
 
     if args.command == "transcript-drain":
         if not args.once:
