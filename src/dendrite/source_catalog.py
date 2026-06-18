@@ -158,7 +158,8 @@ def resolve_source_ref(
     if not approval_ref:
         return _response("approval_required", "approval_required", record=record, same_device_proof="passed")
     max_len = max(1, min(int(max_bytes), 65536))
-    content = absolute_path.read_bytes()[:max_len].decode("utf-8", errors="replace")
+    with absolute_path.open("rb") as handle:
+        content = handle.read(max_len).decode("utf-8", errors="replace")
     return _response(
         "resolved",
         "approved_same_device",
