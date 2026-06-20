@@ -1,0 +1,224 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 700" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace">
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#0c142b"/>
+      <stop offset="1" stop-color="#070b18"/>
+    </linearGradient>
+    <pattern id="grid" width="34" height="34" patternUnits="userSpaceOnUse">
+      <path d="M34 0H0V34" fill="none" stroke="#14203d" stroke-width="1"/>
+    </pattern>
+    <marker id="flow" viewBox="0 0 12 12" refX="9" refY="6" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0 0 L12 6 L0 12 L3.5 6 Z" fill="#2dd4bf"/>
+    </marker>
+    <marker id="cross" viewBox="0 0 12 12" refX="9" refY="6" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0 0 L12 6 L0 12 L3.5 6 Z" fill="#f97316"/>
+    </marker>
+  </defs>
+
+  <rect width="1280" height="700" fill="url(#sky)"/>
+  <rect width="1280" height="700" fill="url(#grid)"/>
+  <rect x="0" y="0" width="1280" height="4" fill="#2dd4bf"/>
+
+  <!-- header -->
+  <text x="56" y="60" fill="#f1f5f9" font-size="32" font-weight="700" letter-spacing="1">dendrite 파이프라인</text>
+  <text x="58" y="86" fill="#5b6b8c" font-size="13.5">locator-only capture  ›  redaction boundary  ›  tick-bounded thin shipper  ›  neurons로 POST</text>
+
+  <!-- role legend -->
+  <g font-size="11.5" font-weight="600">
+    <rect x="952" y="36" width="272" height="40" rx="9" fill="#101a33" stroke="#1f2d4a"/>
+    <text x="970" y="61" fill="#5b6b8c" font-size="10.5">ROLE</text>
+    <circle cx="1018" cy="56" r="6" fill="#818cf8"/><text x="1030" y="60" fill="#9fb3d1">thin-client</text>
+    <circle cx="1130" cy="56" r="6" fill="#f97316"/><text x="1142" y="60" fill="#9fb3d1">out-of-repo</text>
+  </g>
+
+  <!-- thin-client boundary -->
+  <g>
+    <rect x="44" y="150" width="900" height="356" rx="16" fill="none" stroke="#2dd4bf" stroke-width="1.4" stroke-dasharray="7 6" opacity="0.55"/>
+    <rect x="56" y="138" width="318" height="24" rx="6" fill="#0c142b"/>
+    <text x="72" y="155" fill="#2dd4bf" font-size="11.5" font-weight="600">dendrite · Mac thin-client (owned)</text>
+  </g>
+
+  <!-- out-of-repo target boundary -->
+  <g>
+    <rect x="1000" y="150" width="232" height="356" rx="16" fill="none" stroke="#f97316" stroke-width="1.4" stroke-dasharray="7 6" opacity="0.5"/>
+    <rect x="1012" y="138" width="208" height="24" rx="6" fill="#0c142b"/>
+    <text x="1026" y="155" fill="#fb923c" font-size="11" font-weight="600">neurons · out-of-repo</text>
+  </g>
+
+  <!-- ===== PROVIDER HOOKS ===== -->
+  <text x="56" y="184" fill="#5b6b8c" font-size="11" font-weight="700" letter-spacing="1.5">PROVIDER HOOK</text>
+  <g>
+    <rect x="56" y="196" width="172" height="248" rx="13" fill="#111b35" stroke="#283a5e"/>
+    <rect x="56" y="196" width="4" height="248" rx="2" fill="#818cf8"/>
+    <text x="76" y="224" fill="#dbe4f3" font-size="12.5" font-weight="700">provider hook</text>
+    <text x="76" y="242" fill="#5b6b8c" font-size="10">session lifecycle 이벤트</text>
+    <g font-size="10.5" fill="#c7d2fe">
+      <rect x="74" y="256" width="136" height="26" rx="6" fill="#1a2347"/><text x="86" y="273">claude</text>
+      <rect x="74" y="290" width="136" height="26" rx="6" fill="#1a2347"/><text x="86" y="307">codex</text>
+      <rect x="74" y="324" width="136" height="26" rx="6" fill="#1a2347"/><text x="86" y="341">gemini</text>
+      <rect x="74" y="358" width="136" height="26" rx="6" fill="#1a2347"/><text x="86" y="375">antigravity</text>
+    </g>
+    <text x="76" y="406" fill="#5b6b8c" font-size="9.5">on stop · on session end</text>
+    <text x="76" y="422" fill="#5b6b8c" font-size="9.5">emit locator only</text>
+  </g>
+
+  <!-- ===== LOCATOR-ONLY CAPTURE ===== -->
+  <text x="252" y="184" fill="#5b6b8c" font-size="11" font-weight="700" letter-spacing="1.5">CAPTURE</text>
+  <g>
+    <rect x="252" y="196" width="172" height="248" rx="13" fill="#111d3a" stroke="#2dd4bf" stroke-width="1.3"/>
+    <rect x="252" y="196" width="172" height="34" rx="13" fill="#15294a"/>
+    <rect x="252" y="218" width="172" height="12" fill="#15294a"/>
+    <circle cx="272" cy="213" r="5" fill="#2dd4bf"/>
+    <text x="286" y="217" fill="#7af0e0" font-size="12.5" font-weight="700">locator capture</text>
+    <text x="268" y="256" fill="#9fb3d1" font-size="10.5">› session_locator</text>
+    <text x="268" y="278" fill="#9fb3d1" font-size="10.5">› provider · cwd role</text>
+    <text x="268" y="300" fill="#9fb3d1" font-size="10.5">› byte offset · range</text>
+    <line x1="268" y1="316" x2="408" y2="316" stroke="#1f2d4a"/>
+    <g>
+      <rect x="268" y="328" width="140" height="50" rx="7" fill="#0f1c20" stroke="#1f4a3a" stroke-dasharray="4 3"/>
+      <text x="280" y="347" fill="#34d399" font-size="9.5">capture 규칙</text>
+      <text x="280" y="364" fill="#9fb3d1" font-size="9.5">raw transcript body</text>
+      <text x="280" y="376" fill="#fca5a5" font-size="9.5">NOT read</text>
+    </g>
+    <text x="268" y="400" fill="#5b6b8c" font-size="9.5">pointer 만 기록</text>
+    <text x="268" y="422" fill="#5b6b8c" font-size="9.5">no content copy</text>
+  </g>
+
+  <!-- ===== SPOOL ===== -->
+  <text x="448" y="184" fill="#5b6b8c" font-size="11" font-weight="700" letter-spacing="1.5">SPOOL</text>
+  <g>
+    <rect x="448" y="196" width="158" height="118" rx="13" fill="#111d3a" stroke="#22d3ee" stroke-width="1.3"/>
+    <rect x="448" y="196" width="158" height="34" rx="13" fill="#10324a"/>
+    <rect x="448" y="218" width="158" height="12" fill="#10324a"/>
+    <circle cx="468" cy="213" r="5" fill="#22d3ee"/>
+    <text x="482" y="217" fill="#7fe7f7" font-size="12.5" font-weight="700">spool</text>
+    <text x="464" y="256" fill="#9fb3d1" font-size="10.5">append-only 큐</text>
+    <text x="464" y="278" fill="#9fb3d1" font-size="10.5">locator record</text>
+    <text x="464" y="300" fill="#5b6b8c" font-size="9.5">durable · 재시작 안전</text>
+  </g>
+
+  <!-- ===== OUTBOX ===== -->
+  <text x="448" y="338" fill="#5b6b8c" font-size="11" font-weight="700" letter-spacing="1.5">OUTBOX</text>
+  <g>
+    <rect x="448" y="350" width="158" height="94" rx="13" fill="#111d3a" stroke="#22d3ee" stroke-width="1.3"/>
+    <rect x="448" y="350" width="158" height="34" rx="13" fill="#10324a"/>
+    <rect x="448" y="372" width="158" height="12" fill="#10324a"/>
+    <circle cx="468" cy="367" r="5" fill="#22d3ee"/>
+    <text x="482" y="371" fill="#7fe7f7" font-size="12.5" font-weight="700">outbox</text>
+    <text x="464" y="408" fill="#9fb3d1" font-size="10.5">ship 대기 batch</text>
+    <text x="464" y="428" fill="#5b6b8c" font-size="9.5">at-least-once · ack 후 drop</text>
+  </g>
+
+  <!-- ===== BOUNDED THIN SHIPPER ===== -->
+  <text x="630" y="184" fill="#5b6b8c" font-size="11" font-weight="700" letter-spacing="1.5">SHIPPER</text>
+  <g>
+    <rect x="630" y="196" width="186" height="248" rx="13" fill="#111d3a" stroke="#34d399" stroke-width="1.3"/>
+    <rect x="630" y="196" width="186" height="34" rx="13" fill="#123a31"/>
+    <rect x="630" y="218" width="186" height="12" fill="#123a31"/>
+    <circle cx="650" cy="213" r="5" fill="#34d399"/>
+    <text x="664" y="217" fill="#86efc4" font-size="12.5" font-weight="700">thin shipper</text>
+    <text x="646" y="256" fill="#9fb3d1" font-size="10.5">› drain outbox</text>
+    <text x="646" y="278" fill="#9fb3d1" font-size="10.5">› per-tick budget</text>
+    <text x="646" y="300" fill="#9fb3d1" font-size="10.5">› retry · backoff</text>
+    <line x1="646" y1="316" x2="800" y2="316" stroke="#1f2d4a"/>
+    <g>
+      <rect x="646" y="328" width="154" height="50" rx="7" fill="#0f1c20" stroke="#1f4a3a" stroke-dasharray="4 3"/>
+      <text x="658" y="347" fill="#34d399" font-size="9.5">drain 정책</text>
+      <text x="658" y="364" fill="#9fb3d1" font-size="9.5">tick-bounded drain</text>
+      <text x="658" y="376" fill="#5b6b8c" font-size="9">한 tick 당 상한 고정</text>
+    </g>
+    <text x="646" y="400" fill="#5b6b8c" font-size="9.5">thin · 상태 소유 안 함</text>
+    <text x="646" y="422" fill="#5b6b8c" font-size="9.5">backpressure 시 hold</text>
+  </g>
+
+  <!-- ===== REDACTION BOUNDARY (membrane before POST) ===== -->
+  <g>
+    <line x1="840" y1="206" x2="840" y2="434" stroke="#f97316" stroke-width="2" stroke-dasharray="3 4"/>
+    <rect x="820" y="276" width="40" height="88" rx="8" fill="#1c1426" stroke="#f97316"/>
+    <text x="840" y="296" fill="#fb923c" font-size="9" text-anchor="middle">redaction</text>
+    <text x="840" y="307" fill="#fb923c" font-size="9" text-anchor="middle">boundary</text>
+    <line x1="826" y1="316" x2="854" y2="316" stroke="#5a3a1a"/>
+    <text x="840" y="330" fill="#fca5a5" font-size="8" text-anchor="middle">token</text>
+    <text x="840" y="342" fill="#fca5a5" font-size="8" text-anchor="middle">path</text>
+    <text x="840" y="354" fill="#fca5a5" font-size="8" text-anchor="middle">dataset_id</text>
+  </g>
+
+  <!-- ===== POST 18080 ===== -->
+  <text x="936" y="184" fill="#5b6b8c" font-size="11" font-weight="700" letter-spacing="1.5">POST</text>
+  <g>
+    <rect x="936" y="196" width="116" height="248" rx="13" fill="#11202e" stroke="#f59e0b" stroke-width="1.3"/>
+    <rect x="936" y="196" width="116" height="34" rx="13" fill="#2a1f0c"/>
+    <rect x="936" y="218" width="116" height="12" fill="#2a1f0c"/>
+    <circle cx="956" cy="213" r="5" fill="#f59e0b"/>
+    <text x="970" y="217" fill="#fcd34d" font-size="12.5" font-weight="700">POST</text>
+    <text x="952" y="256" fill="#9fb3d1" font-size="10.5">:18080</text>
+    <text x="952" y="278" fill="#9fb3d1" font-size="10">/enqueue</text>
+    <text x="952" y="304" fill="#7c8cae" font-size="9.5">redacted</text>
+    <text x="952" y="318" fill="#7c8cae" font-size="9.5">job payload</text>
+    <line x1="952" y1="332" x2="1036" y2="332" stroke="#1f2d4a"/>
+    <text x="952" y="356" fill="#5b6b8c" font-size="9">loopback</text>
+    <text x="952" y="372" fill="#5b6b8c" font-size="9">host.docker</text>
+    <text x="952" y="384" fill="#5b6b8c" font-size="9">.internal</text>
+    <text x="952" y="412" fill="#5b6b8c" font-size="9">202 queued</text>
+    <text x="952" y="428" fill="#5b6b8c" font-size="9">503 → 재시도</text>
+  </g>
+
+  <!-- ===== NEURONS INGRESS (out-of-repo target) ===== -->
+  <text x="1028" y="184" fill="#5b6b8c" font-size="11" font-weight="700" letter-spacing="1.5" text-anchor="middle" transform="translate(88,0)">TARGET</text>
+  <g>
+    <rect x="1028" y="196" width="176" height="248" rx="13" fill="#1c1626" stroke="#f97316" stroke-width="1.3" stroke-dasharray="7 5"/>
+    <rect x="1028" y="196" width="176" height="34" rx="13" fill="#3a2412"/>
+    <rect x="1028" y="218" width="176" height="12" fill="#3a2412"/>
+    <circle cx="1048" cy="213" r="5" fill="#f97316"/>
+    <text x="1062" y="217" fill="#fdba74" font-size="12.5" font-weight="700">neurons ingress</text>
+    <text x="1044" y="256" fill="#9fb3d1" font-size="10">ingress-api 수신</text>
+    <text x="1044" y="278" fill="#9fb3d1" font-size="10">validate · idempotency</text>
+    <text x="1044" y="300" fill="#9fb3d1" font-size="10">queue publish</text>
+    <line x1="1044" y1="316" x2="1188" y2="316" stroke="#3a2a18"/>
+    <text x="1044" y="340" fill="#fb923c" font-size="9.5">dendrite repo 밖</text>
+    <text x="1044" y="358" fill="#5b6b8c" font-size="9.5">server / brain repo</text>
+    <text x="1044" y="380" fill="#5b6b8c" font-size="9.5">downstream 소유권은</text>
+    <text x="1044" y="394" fill="#5b6b8c" font-size="9.5">neurons 에 있음</text>
+    <text x="1044" y="424" fill="#475569" font-size="8">thin-client = fire-and-forget</text>
+  </g>
+
+  <!-- ===== FLOW CONNECTORS ===== -->
+  <g fill="none" stroke="#2dd4bf" stroke-width="2" marker-end="url(#flow)">
+    <path d="M228 320 H252"/>
+    <path d="M424 280 C436 280 436 255 448 255"/>
+    <path d="M606 255 C618 255 618 397 630 397"/>
+  </g>
+  <!-- spool -> outbox internal -->
+  <g fill="none" stroke="#34406a" stroke-width="1.6" marker-end="url(#flow)">
+    <path d="M527 314 V350"/>
+  </g>
+  <!-- shipper -> POST (crosses redaction boundary, orange) -->
+  <g fill="none" stroke="#f97316" stroke-width="2" marker-end="url(#cross)">
+    <path d="M816 320 H936"/>
+  </g>
+  <!-- POST -> neurons ingress (dashed, out-of-repo) -->
+  <g fill="none" stroke="#f97316" stroke-width="2" stroke-dasharray="6 5" marker-end="url(#cross)">
+    <path d="M1052 320 H1028"/>
+  </g>
+
+  <!-- connector labels -->
+  <g font-size="10.5" fill="#7c8cae" text-anchor="middle">
+    <text x="240" y="306">locator</text>
+    <text x="700" y="270">drain</text>
+    <text x="876" y="306">redact › ship</text>
+  </g>
+  <text x="1040" y="470" fill="#fb923c" font-size="9.5" text-anchor="middle">loopback POST (process boundary)</text>
+
+  <!-- ===== BOTTOM STRIP : BOUNDARY NOTE ===== -->
+  <g>
+    <rect x="56" y="540" width="1168" height="112" rx="13" fill="#0e1730" stroke="#1f2d4a"/>
+    <text x="78" y="570" fill="#5b6b8c" font-size="11" font-weight="700" letter-spacing="1.5">소유 경계</text>
+    <line x1="78" y1="580" x2="1202" y2="580" stroke="#1f2d4a"/>
+    <g font-size="11">
+      <text x="78" y="606" fill="#9fb3d1">◆ dendrite 가 소유: provider hook · locator capture · spool/outbox · tick-bounded thin shipper · redaction</text>
+      <text x="78" y="626" fill="#fca5a5">◆ Not owned → neurons: Ledger · worker · RAGFlow write · session/native memory · GC</text>
+      <text x="78" y="646" fill="#9fb3d1">◆ raw transcript body 는 읽지 않음 · token · path · dataset_id 는 redaction boundary 에서 차단</text>
+      <text x="730" y="646" fill="#7c8cae">◆ thin-client 는 상태를 보관하지 않고 redacted locator 만 loopback 으로 전달</text>
+    </g>
+  </g>
+</svg>
