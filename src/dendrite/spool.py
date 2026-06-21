@@ -154,11 +154,14 @@ class JsonFileSpool:
         return name
 
 
-class Spool(JsonFileSpool):
+class Spool:
     SUBDIRS = JsonFileSpool.DEFAULT_SUBDIRS
 
     def __init__(self, root: Path | str):
-        super().__init__(root, subdirs=self.SUBDIRS, root_label="spool")
+        self._spool = JsonFileSpool(root, subdirs=self.SUBDIRS, root_label="spool")
+        self.root = self._spool.root
+        self.subdirs = self._spool.subdirs
+        self.root_label = self._spool.root_label
 
     def enqueue(self, event: dict) -> Path:
         validate_event(event)
@@ -167,3 +170,43 @@ class Spool(JsonFileSpool):
 
     def _find_existing(self, name: str) -> Path | None:
         return self.find_existing(name)
+
+    def write_json_once(
+        self,
+        filename: str,
+        payload: dict,
+        *,
+        subdir: str = "pending",
+        separators: tuple[str, str] | None = None,
+    ) -> Path:
+        return self._spool.write_json_once(filename, payload, subdir=subdir, separators=separators)
+
+    def replace_json(
+        self,
+        path: Path | str,
+        payload: dict,
+        *,
+        separators: tuple[str, str] | None = None,
+    ) -> Path:
+        return self._spool.replace_json(path, payload, separators=separators)
+
+    def find_existing(self, name: str) -> Path | None:
+        return self._spool.find_existing(name)
+
+    def files(self, subdir: str) -> list[Path]:
+        return self._spool.files(subdir)
+
+    def claim_next(self, *, empty_message: str = "no pending spool events") -> Path:
+        return self._spool.claim_next(empty_message=empty_message)
+
+    def ack(self, processing_path: Path | str) -> Path:
+        return self._spool.ack(processing_path)
+
+    def quarantine(self, processing_path: Path | str) -> Path:
+        return self._spool.quarantine(processing_path)
+
+    def move_to(self, source_path: Path | str, subdir: str) -> Path:
+        return self._spool.move_to(source_path, subdir)
+
+    def depth_counts(self) -> dict[str, int]:
+        return self._spool.depth_counts()
