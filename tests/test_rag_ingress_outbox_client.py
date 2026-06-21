@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from http.server import BaseHTTPRequestHandler
 from threading import Thread
+import urllib.error
 
 from dendrite.rag_ingress.outbox_client import (
     FileBackedIngressOutbox,
@@ -134,6 +135,160 @@ def test_http_client_rejects_credentials_in_base_url():
         raise AssertionError("base_url credentials must be rejected")
 
 
+def test_http_client_treats_5xx_as_unreachable(monkeypatch):
+    def fake_urlopen(_request, timeout):
+        _ = timeout
+        raise urllib.error.HTTPError("http://127.0.0.1:18080", 503, "unavailable", {}, None)
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+
+    try:
+        RagIngressHttpClient(base_url="http://127.0.0.1:18080").enqueue_document_payload(_payload())
+    except IngressEnqueueUnreachable as exc:
+        assert "unreachable" in str(exc)
+        assert "http_503" in str(exc)
+    else:
+        raise AssertionError("HTTP 5xx must be retryable/unreachable")
+
+
+def test_http_client_treats_unsafe_4xx_as_unreachable(monkeypatch):
+    def fake_urlopen(_request, timeout):
+        _ = timeout
+        raise urllib.error.HTTPError("http://127.0.0.1:18080", 403, "forbidden", {}, None)
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+
+    try:
+        RagIngressHttpClient(base_url="http://127.0.0.1:18080").enqueue_document_payload(_payload())
+    except IngressEnqueueUnreachable as exc:
+        assert "unreachable" in str(exc)
+        assert "http_403" in str(exc)
+    else:
+        raise AssertionError("unsafe HTTP 4xx must be retryable/unreachable")
+
+
+def test_http_client_treats_safe_4xx_payload_rejection_as_rejected(monkeypatch):
+    error = urllib.error.HTTPError(
+        "http://127.0.0.1:18080", 400, "bad request", {}, _BytesResponse(b'{"status":"payload_invalid"}')
+    )
+
+    def fake_urlopen(_request, timeout):
+        _ = timeout
+        raise error
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+
+    try:
+        RagIngressHttpClient(base_url="http://127.0.0.1:18080").enqueue_document_payload(_payload())
+    except IngressEnqueueRejected as exc:
+        assert "payload_invalid" in str(exc)
+    else:
+        raise AssertionError("safe HTTP 4xx payload rejection must be rejected")
+
+
+def test_http_client_treats_unsafe_4xx_with_safe_body_as_unreachable(monkeypatch):
+    error = urllib.error.HTTPError(
+        "http://127.0.0.1:18080", 403, "forbidden", {}, _BytesResponse(b'{"status":"payload_invalid"}')
+    )
+
+    def fake_urlopen(_request, timeout):
+        _ = timeout
+        raise error
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+
+    try:
+        RagIngressHttpClient(base_url="http://127.0.0.1:18080").enqueue_document_payload(_payload())
+    except IngressEnqueueUnreachable as exc:
+        assert "http_403" in str(exc)
+    else:
+        raise AssertionError("unsafe HTTP 4xx must stay retryable even with a safe-looking body")
+
+
+def test_http_client_treats_invalid_json_response_as_unreachable(monkeypatch):
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, traceback):
+            return False
+
+        def read(self):
+            return b"not-json"
+
+    monkeypatch.setattr("urllib.request.urlopen", lambda _request, timeout: FakeResponse())
+
+    try:
+        RagIngressHttpClient(base_url="http://127.0.0.1:18080").enqueue_document_payload(_payload())
+    except IngressEnqueueUnreachable as exc:
+        assert "invalid_json" in str(exc)
+    else:
+        raise AssertionError("invalid ingress responses must be retryable/unreachable")
+
+
+def test_http_client_treats_invalid_utf8_response_as_unreachable(monkeypatch):
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, traceback):
+            return False
+
+        def read(self):
+            return b"\xff"
+
+    monkeypatch.setattr("urllib.request.urlopen", lambda _request, timeout: FakeResponse())
+
+    try:
+        RagIngressHttpClient(base_url="http://127.0.0.1:18080").enqueue_document_payload(_payload())
+    except IngressEnqueueUnreachable as exc:
+        assert "invalid_response" in str(exc)
+    else:
+        raise AssertionError("unparseable ingress responses must be retryable/unreachable")
+
+
+def test_http_client_treats_transient_accepted_false_as_unreachable(monkeypatch):
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, traceback):
+            return False
+
+        def read(self):
+            return b'{"accepted":false,"status":"backpressure"}'
+
+    monkeypatch.setattr("urllib.request.urlopen", lambda _request, timeout: FakeResponse())
+
+    try:
+        RagIngressHttpClient(base_url="http://127.0.0.1:18080").enqueue_document_payload(_payload())
+    except IngressEnqueueUnreachable as exc:
+        assert "backpressure" in str(exc)
+    else:
+        raise AssertionError("transient accepted=false must be retryable/unreachable")
+
+
+def test_http_client_treats_safe_accepted_false_payload_rejection_as_rejected(monkeypatch):
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, traceback):
+            return False
+
+        def read(self):
+            return b'{"accepted":false,"status":"payload_invalid"}'
+
+    monkeypatch.setattr("urllib.request.urlopen", lambda _request, timeout: FakeResponse())
+
+    try:
+        RagIngressHttpClient(base_url="http://127.0.0.1:18080").enqueue_document_payload(_payload())
+    except IngressEnqueueRejected as exc:
+        assert "payload_invalid" in str(exc)
+    else:
+        raise AssertionError("safe payload rejection must be permanent/rejected")
+
+
 def test_validate_outbox_payload_rejects_invalid_body():
     payload = _payload()
     payload["payload"]["document"]["body"] = ""
@@ -144,3 +299,14 @@ def test_validate_outbox_payload_rejects_invalid_body():
         assert "document.body" in str(exc)
     else:
         raise AssertionError("empty document body must be rejected")
+
+
+class _BytesResponse:
+    def __init__(self, body: bytes):
+        self._body = body
+
+    def read(self) -> bytes:
+        return self._body
+
+    def close(self) -> None:
+        return None

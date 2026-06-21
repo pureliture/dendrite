@@ -124,6 +124,227 @@ def test_transcript_drain_requeues_recoverable_ingress_failure(tmp_path, monkeyp
     pending = next((spool.root / "pending").glob("*.json"))
     payload = json.loads(pending.read_text(encoding="utf-8"))
     assert payload["last_failure"]["recoverable"] is True
+    assert payload["last_failure"]["retry_attempts"] == 1
+    assert payload["last_failure"]["last_attempt_at"]
+
+    rc = main(
+        [
+            "transcript-drain",
+            "--once",
+            "--capture-spool",
+            str(spool.root),
+            "--ingress-url",
+            "http://127.0.0.1:18080",
+        ]
+    )
+
+    assert rc == 1
+    _ = json.loads(capsys.readouterr().out)
+    pending = next((spool.root / "pending").glob("*.json"))
+    payload = json.loads(pending.read_text(encoding="utf-8"))
+    assert payload["last_failure"]["retry_attempts"] == 2
+
+
+def test_transcript_drain_requeues_retryable_http5xx(tmp_path, monkeypatch, capsys):
+    source = tmp_path / "codex-session.jsonl"
+    source.write_text('{"role":"user","content":"hello"}\n', encoding="utf-8")
+    spool = TranscriptCaptureSpool(tmp_path / "spool")
+    spool.enqueue(_capture_request(source))
+
+    def fake_urlopen(_request, timeout=None):
+        _ = timeout
+        raise urllib.error.HTTPError("http://127.0.0.1:18080", 503, "unavailable", {}, None)
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+
+    rc = main(
+        [
+            "transcript-drain",
+            "--once",
+            "--capture-spool",
+            str(spool.root),
+            "--ingress-url",
+            "http://127.0.0.1:18080",
+        ]
+    )
+
+    assert rc == 1
+    report = json.loads(capsys.readouterr().out)
+    assert report["status"] == "retry_pending"
+    assert report["last_error_class"] == "ingress_unreachable"
+    assert spool.depth_counts() == {"pending": 1, "processing": 0, "acked": 0, "quarantine": 0}
+
+
+def test_transcript_drain_requeues_unsafe_http4xx(tmp_path, monkeypatch, capsys):
+    source = tmp_path / "codex-session.jsonl"
+    source.write_text('{"role":"user","content":"hello"}\n', encoding="utf-8")
+    spool = TranscriptCaptureSpool(tmp_path / "spool")
+    spool.enqueue(_capture_request(source))
+
+    def fake_urlopen(_request, timeout=None):
+        _ = timeout
+        raise urllib.error.HTTPError("http://127.0.0.1:18080", 403, "forbidden", {}, None)
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+
+    rc = main(
+        [
+            "transcript-drain",
+            "--once",
+            "--capture-spool",
+            str(spool.root),
+            "--ingress-url",
+            "http://127.0.0.1:18080",
+        ]
+    )
+
+    assert rc == 1
+    report = json.loads(capsys.readouterr().out)
+    assert report["status"] == "retry_pending"
+    assert report["last_error_class"] == "ingress_unreachable"
+    assert spool.depth_counts() == {"pending": 1, "processing": 0, "acked": 0, "quarantine": 0}
+
+
+def test_transcript_drain_requeues_invalid_ingress_response(tmp_path, monkeypatch, capsys):
+    source = tmp_path / "codex-session.jsonl"
+    source.write_text('{"role":"user","content":"hello"}\n', encoding="utf-8")
+    spool = TranscriptCaptureSpool(tmp_path / "spool")
+    spool.enqueue(_capture_request(source))
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, traceback):
+            return False
+
+        def read(self):
+            return b"not-json"
+
+    monkeypatch.setattr("urllib.request.urlopen", lambda _request, timeout=None: FakeResponse())
+
+    rc = main(
+        [
+            "transcript-drain",
+            "--once",
+            "--capture-spool",
+            str(spool.root),
+            "--ingress-url",
+            "http://127.0.0.1:18080",
+        ]
+    )
+
+    assert rc == 1
+    report = json.loads(capsys.readouterr().out)
+    assert report["status"] == "retry_pending"
+    assert report["last_error_class"] == "ingress_invalid_json"
+    assert spool.depth_counts() == {"pending": 1, "processing": 0, "acked": 0, "quarantine": 0}
+
+
+def test_transcript_drain_requeues_unparseable_ingress_response(tmp_path, monkeypatch, capsys):
+    source = tmp_path / "codex-session.jsonl"
+    source.write_text('{"role":"user","content":"hello"}\n', encoding="utf-8")
+    spool = TranscriptCaptureSpool(tmp_path / "spool")
+    spool.enqueue(_capture_request(source))
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, traceback):
+            return False
+
+        def read(self):
+            return b"\xff"
+
+    monkeypatch.setattr("urllib.request.urlopen", lambda _request, timeout=None: FakeResponse())
+
+    rc = main(
+        [
+            "transcript-drain",
+            "--once",
+            "--capture-spool",
+            str(spool.root),
+            "--ingress-url",
+            "http://127.0.0.1:18080",
+        ]
+    )
+
+    assert rc == 1
+    report = json.loads(capsys.readouterr().out)
+    assert report["status"] == "retry_pending"
+    assert report["last_error_class"] == "ingress_unreachable"
+    assert spool.depth_counts() == {"pending": 1, "processing": 0, "acked": 0, "quarantine": 0}
+
+
+def test_transcript_drain_requeues_transient_accepted_false(tmp_path, monkeypatch, capsys):
+    source = tmp_path / "codex-session.jsonl"
+    source.write_text('{"role":"user","content":"hello"}\n', encoding="utf-8")
+    spool = TranscriptCaptureSpool(tmp_path / "spool")
+    spool.enqueue(_capture_request(source))
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, traceback):
+            return False
+
+        def read(self):
+            return b'{"accepted":false,"status":"backpressure"}'
+
+    monkeypatch.setattr("urllib.request.urlopen", lambda _request, timeout=None: FakeResponse())
+
+    rc = main(
+        [
+            "transcript-drain",
+            "--once",
+            "--capture-spool",
+            str(spool.root),
+            "--ingress-url",
+            "http://127.0.0.1:18080",
+        ]
+    )
+
+    assert rc == 1
+    report = json.loads(capsys.readouterr().out)
+    assert report["status"] == "retry_pending"
+    assert report["last_error_class"] == "ingress_unreachable"
+    assert spool.depth_counts() == {"pending": 1, "processing": 0, "acked": 0, "quarantine": 0}
+
+
+def test_transcript_drain_quarantines_safe_http4xx_rejection(tmp_path, monkeypatch, capsys):
+    source = tmp_path / "codex-session.jsonl"
+    source.write_text('{"role":"user","content":"hello"}\n', encoding="utf-8")
+    spool = TranscriptCaptureSpool(tmp_path / "spool")
+    spool.enqueue(_capture_request(source))
+
+    error = urllib.error.HTTPError(
+        "http://127.0.0.1:18080", 400, "bad request", {}, _BytesResponse(b'{"status":"payload_invalid"}')
+    )
+
+    def fake_urlopen(_request, timeout=None):
+        _ = timeout
+        raise error
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+
+    rc = main(
+        [
+            "transcript-drain",
+            "--once",
+            "--capture-spool",
+            str(spool.root),
+            "--ingress-url",
+            "http://127.0.0.1:18080",
+        ]
+    )
+
+    assert rc == 1
+    report = json.loads(capsys.readouterr().out)
+    assert report["status"] == "quarantined"
+    assert report["last_error_class"] == "ingress_rejected"
+    assert spool.depth_counts() == {"pending": 0, "processing": 0, "acked": 0, "quarantine": 1}
 
 
 def test_transcript_drain_quarantines_missing_source_without_raw_path(tmp_path, capsys):
@@ -150,3 +371,14 @@ def test_transcript_drain_quarantines_missing_source_without_raw_path(tmp_path, 
     assert report["last_error_class"] == "source_unreadable"
     assert report["network_used"] is False
     assert spool.depth_counts() == {"pending": 0, "processing": 0, "acked": 0, "quarantine": 1}
+
+
+class _BytesResponse:
+    def __init__(self, body: bytes):
+        self._body = body
+
+    def read(self) -> bytes:
+        return self._body
+
+    def close(self) -> None:
+        return None

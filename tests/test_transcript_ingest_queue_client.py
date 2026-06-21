@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 from types import SimpleNamespace
+import urllib.error
 
 from dendrite.transcript_ingest import IngressQueueClient
 
@@ -77,3 +78,63 @@ def test_ingress_queue_client_posts_versioned_redacted_contract(monkeypatch) -> 
     assert payload["kind"] == "conversation_chunk"
     assert payload["payload"]["document"]["metadata"]["turn_start_index"] == "1"
     assert payload["payload"]["document"]["metadata"]["turn_end_index"] == "2"
+
+
+def test_ingress_queue_client_rejects_credentials_in_base_url() -> None:
+    try:
+        IngressQueueClient(base_url="http://user:pass@127.0.0.1:8080")
+    except ValueError as exc:
+        assert "must not contain credentials" in str(exc)
+    else:
+        raise AssertionError("base_url credentials must be rejected")
+
+
+def test_ingress_queue_client_treats_http5xx_as_retryable(monkeypatch) -> None:
+    def fake_urlopen(_request, timeout):
+        _ = timeout
+        raise urllib.error.HTTPError("http://127.0.0.1:8080", 503, "unavailable", {}, None)
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+
+    try:
+        IngressQueueClient(base_url="http://127.0.0.1:8080").enqueue_document(
+            source={"producer": "test"},
+            packed=SimpleNamespace(filename="chunk.md", body="# body\n", metadata={}),
+            content_hash="sha256:" + "a" * 64,
+            target_profile="ragflow-transcript-memory",
+            kind="conversation_chunk",
+            idempotency_key="codex:conversation_chunk:test",
+        )
+    except RuntimeError as exc:
+        assert "unreachable" in str(exc)
+        assert "http_503" in str(exc)
+    else:
+        raise AssertionError("HTTP 5xx must be retryable")
+
+
+def test_ingress_queue_client_invalid_json_response_is_retryable(monkeypatch) -> None:
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, traceback):
+            return False
+
+        def read(self):
+            return b"not-json"
+
+    monkeypatch.setattr("urllib.request.urlopen", lambda _request, timeout: FakeResponse())
+
+    try:
+        IngressQueueClient(base_url="http://127.0.0.1:8080").enqueue_document(
+            source={"producer": "test"},
+            packed=SimpleNamespace(filename="chunk.md", body="# body\n", metadata={}),
+            content_hash="sha256:" + "a" * 64,
+            target_profile="ragflow-transcript-memory",
+            kind="conversation_chunk",
+            idempotency_key="codex:conversation_chunk:test",
+        )
+    except RuntimeError as exc:
+        assert "invalid_json" in str(exc)
+    else:
+        raise AssertionError("invalid ingress responses must be retryable")

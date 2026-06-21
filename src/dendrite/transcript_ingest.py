@@ -2,10 +2,9 @@ from __future__ import annotations
 
 import json
 import re
-import urllib.error
-import urllib.request
 from dataclasses import replace
 
+from .ingress_transport import IngressHttpTransport
 from .rag_ingress.rag_ready_document import RagReadyDocument, build_rag_ready_document
 from .redaction import redact_public_ingress_text, redact_text_v2
 
@@ -19,8 +18,9 @@ class IngressQueueClient:
     def __init__(self, *, base_url: str, timeout_seconds: float = 10.0):
         if not base_url:
             raise ValueError("ingress base_url is required")
-        self.base_url = base_url.rstrip("/")
-        self.timeout_seconds = timeout_seconds
+        self._transport = IngressHttpTransport(base_url=base_url, timeout_seconds=timeout_seconds)
+        self.base_url = self._transport.base_url
+        self.timeout_seconds = self._transport.timeout_seconds
 
     def enqueue_document(
         self,
@@ -40,31 +40,7 @@ class IngressQueueClient:
             kind=kind,
             idempotency_key=idempotency_key,
         )
-        data = json.dumps(request_body, sort_keys=True, separators=(",", ":")).encode("utf-8")
-        request = urllib.request.Request(
-            f"{self.base_url}/v1/ingest/enqueue",
-            data=data,
-            headers={"Accept": "application/json", "Content-Type": "application/json"},
-            method="POST",
-        )
-        try:
-            with urllib.request.urlopen(request, timeout=self.timeout_seconds) as response:
-                response_body = response.read().decode("utf-8")
-        except urllib.error.HTTPError as exc:
-            raise RuntimeError(f"ingress enqueue rejected: http_{exc.code}") from exc
-        except urllib.error.URLError as exc:
-            raise RuntimeError("ingress enqueue failed: unreachable") from exc
-        try:
-            payload = json.loads(response_body or "{}")
-        except json.JSONDecodeError as exc:
-            raise RuntimeError("ingress enqueue failed: invalid_json") from exc
-        if payload.get("accepted") is not True:
-            status = str(payload.get("status") or "rejected")
-            raise RuntimeError(f"ingress enqueue rejected: {status}")
-        return {
-            "job_id": str(payload.get("jobId") or payload.get("job_id") or ""),
-            "status": str(payload.get("status") or "queued"),
-        }
+        return self._transport.enqueue_json_payload(request_body)
 
 
 def build_ingress_enqueue_request_body(

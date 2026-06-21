@@ -12,16 +12,24 @@ FORBIDDEN_IMPORT_ROOTS = {
 }
 
 FORBIDDEN_SOURCE_FRAGMENTS = {
+    "Docker",
+    "GC scheduler",
     "Ledger",
     "MemoryCard",
+    "RAGFLOW_API_KEY",
     "RagflowHttpClient",
     "StateDBIngressSink",
     "ToolEvidenceSyncRunner",
     "TranscriptIngestWorker",
     "brain_query",
+    "direct RAGFlow delete",
+    "direct RAGFlow disable",
+    "direct RAGFlow write",
+    "docker",
     "ragflow_client",
     "server_runtime",
     "session_memory_gc",
+    "ssh ragflow-ubuntu",
     "transcript_memory_gc",
 }
 

@@ -1,31 +1,22 @@
 from __future__ import annotations
 
 import json
-import urllib.error
-import urllib.parse
-import urllib.request
 from dataclasses import dataclass
 from hashlib import sha256
 from pathlib import Path
 
+from ..ingress_transport import (
+    INGRESS_ENQUEUE_PATH,
+    IngressEnqueueError,
+    IngressEnqueueRejected,
+    IngressEnqueueUnreachable,
+    IngressHttpTransport,
+)
 from ..spool import JsonFileSpool
 from .rag_ready_document import DEFAULT_INGRESS_PAYLOAD_KIND, assert_no_secret_like_metadata
 
 
 INGRESS_QUEUE_SCHEMA_VERSION = "rag_ingress_enqueue.v1"
-INGRESS_ENQUEUE_PATH = "/v1/ingest/enqueue"
-
-
-class IngressEnqueueError(RuntimeError):
-    pass
-
-
-class IngressEnqueueRejected(IngressEnqueueError):
-    pass
-
-
-class IngressEnqueueUnreachable(IngressEnqueueError):
-    pass
 
 
 @dataclass(frozen=True)
@@ -37,41 +28,13 @@ class OutboxItem:
 
 class RagIngressHttpClient:
     def __init__(self, *, base_url: str, timeout_seconds: float = 10.0):
-        if not base_url:
-            raise ValueError("base_url is required")
-        parsed = urllib.parse.urlparse(base_url)
-        if parsed.scheme not in {"http", "https"}:
-            raise ValueError("base_url must use http or https")
-        if parsed.username or parsed.password:
-            raise ValueError("base_url must not contain credentials")
-        self.base_url = base_url.rstrip("/")
-        self.timeout_seconds = timeout_seconds
+        self._transport = IngressHttpTransport(base_url=base_url, timeout_seconds=timeout_seconds)
+        self.base_url = self._transport.base_url
+        self.timeout_seconds = self._transport.timeout_seconds
 
     def enqueue_document_payload(self, payload: dict) -> dict:
         validate_outbox_payload(payload)
-        request_body = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
-        request = urllib.request.Request(
-            f"{self.base_url}{INGRESS_ENQUEUE_PATH}",
-            data=request_body,
-            headers={"Accept": "application/json", "Content-Type": "application/json"},
-            method="POST",
-        )
-        try:
-            with urllib.request.urlopen(request, timeout=self.timeout_seconds) as response:
-                response_payload = _read_json_response(response.read().decode("utf-8"))
-        except urllib.error.HTTPError as exc:
-            if 400 <= exc.code < 500:
-                raise IngressEnqueueRejected(f"ingress enqueue rejected: http_{exc.code}") from exc
-            raise IngressEnqueueUnreachable(f"ingress enqueue failed: http_{exc.code}") from exc
-        except (urllib.error.URLError, TimeoutError) as exc:
-            raise IngressEnqueueUnreachable("ingress enqueue failed: unreachable") from exc
-        if response_payload.get("accepted") is not True:
-            status = str(response_payload.get("status") or "rejected")
-            raise IngressEnqueueRejected(f"ingress enqueue rejected: {status}")
-        return {
-            "job_id": str(response_payload.get("jobId") or response_payload.get("job_id") or ""),
-            "status": str(response_payload.get("status") or "queued"),
-        }
+        return self._transport.enqueue_json_payload(payload)
 
 
 class FileBackedIngressOutbox:
@@ -91,7 +54,7 @@ class FileBackedIngressOutbox:
         final_path = self._spool.write_json_once(filename, payload, separators=(",", ":"))
         return OutboxItem(item_id=item_id, path=final_path, status="pending")
 
-    def flush(self, client: RagIngressHttpClient, *, limit: int = 50) -> dict:
+    def flush(self, client, *, limit: int = 50) -> dict:
         sent = 0
         quarantined = 0
         stopped = False
@@ -159,16 +122,6 @@ def validate_outbox_payload(payload: dict) -> dict:
 def outbox_item_id(payload: dict) -> str:
     idempotency_key = str(payload.get("idempotencyKey") or "")
     return "outbox_" + sha256(idempotency_key.encode("utf-8")).hexdigest()[:24]
-
-
-def _read_json_response(body: str) -> dict:
-    try:
-        payload = json.loads(body or "{}")
-    except json.JSONDecodeError as exc:
-        raise IngressEnqueueRejected("ingress enqueue failed: invalid_json") from exc
-    if not isinstance(payload, dict):
-        raise IngressEnqueueRejected("ingress enqueue failed: invalid_json")
-    return payload
 
 
 def _status_for_path(path: Path) -> str:

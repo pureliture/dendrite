@@ -17,7 +17,6 @@ PARSER_VERSION = "dendrite-thin-transcript-drain.v1"
 MAX_TRANSCRIPT_BODY_CHARS = 180_000
 RECOVERABLE_ERROR_CLASSES = {
     "ingress_invalid_json",
-    "ingress_rejected",
     "ingress_unreachable",
 }
 
@@ -74,14 +73,15 @@ def drain_transcript_spool_once(
             last_status = str(enqueue.get("status") or "queued") if isinstance(enqueue, dict) else "queued"
         except Exception as exc:
             error_class = _classify_error(exc)
+            failure = _failure_record(error_class, claimed)
             last_error_class = error_class
             if claimed.exists():
                 if _is_recoverable_error_class(error_class):
-                    capture_spool.requeue_with_failure(claimed, _failure_record(error_class))
+                    capture_spool.requeue_with_failure(claimed, failure)
                     retry_pending += 1
                     last_status = "retry_pending"
                     break
-                capture_spool.quarantine_with_failure(claimed, _failure_record(error_class))
+                capture_spool.quarantine_with_failure(claimed, failure)
                 quarantined += 1
                 last_status = "quarantined"
 
@@ -274,11 +274,21 @@ def _classify_error(exc: Exception) -> str:
     return exc.__class__.__name__
 
 
-def _failure_record(error_class: str) -> dict:
+def _failure_record(error_class: str, request_path: Path | str | None = None) -> dict:
+    retry_attempts = 1
+    if request_path is not None:
+        try:
+            request = json.loads(Path(request_path).read_text(encoding="utf-8"))
+            last_failure = request.get("last_failure") or {}
+            retry_attempts = int(last_failure.get("retry_attempts") or 0) + 1
+        except (OSError, TypeError, ValueError, json.JSONDecodeError):
+            retry_attempts = 1
     return {
         "error_class": error_class,
         "message": error_class,
         "recoverable": error_class in RECOVERABLE_ERROR_CLASSES,
+        "retry_attempts": retry_attempts,
+        "last_attempt_at": _now_iso(),
     }
 
 

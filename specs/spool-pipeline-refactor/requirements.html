@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Spool Pipeline Refactor Requirements</title>
+  <style>
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      color: #1f2933;
+      background: #f7f8fa;
+      line-height: 1.6;
+    }
+    main {
+      max-width: 920px;
+      margin: 0 auto;
+      padding: 40px 24px 64px;
+      background: #fff;
+      min-height: 100vh;
+      box-shadow: 0 0 0 1px #e4e7eb;
+    }
+    h1, h2, h3 { line-height: 1.25; }
+    h1 { margin-top: 0; font-size: 2rem; }
+    h2 { margin-top: 2rem; border-top: 1px solid #e4e7eb; padding-top: 1.25rem; }
+    code {
+      background: #eef2f6;
+      padding: 0.1rem 0.3rem;
+      border-radius: 4px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 1rem 0;
+    }
+    th, td {
+      border: 1px solid #d9e2ec;
+      padding: 0.65rem;
+      text-align: left;
+      vertical-align: top;
+    }
+    th { background: #f1f5f9; }
+    .status {
+      display: inline-block;
+      font-weight: 700;
+      color: #92400e;
+      background: #fef3c7;
+      border: 1px solid #f59e0b;
+      border-radius: 4px;
+      padding: 0.1rem 0.45rem;
+    }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Spool Pipeline Refactor Requirements</h1>
+  <p><span class="status">approved by user autopilot directive</span></p>
+
+  <h2>승인 대상</h2>
+  <ul>
+    <li>Source of truth: <code>requirements.md</code></li>
+    <li>Preview companion: <code>requirements.html</code></li>
+  </ul>
+
+  <h2>요약</h2>
+  <p><code>dendrite</code>의 2차 리팩토링으로, local spool/pipeline 코드를 더 깊은 인터페이스와 명확한 전송 경계로 정리한다.</p>
+  <p>완료 범위는 리팩토링 구현, 로컬/런타임 검증, 프로덕션 검증까지 포함한다. 코드 정리나 테스트 통과에서 멈추지 않고 실제 운영 표면에서 동작이 확인되어야 한다.</p>
+  <p>Production verification은 phased gate로 진행한다. 기본 완료 범위는 read-only production-adjacent audit와 local/fake-server synthetic smoke다. Live <code>POST /v1/ingest/enqueue</code> synthetic canary는 별도 승인 gate가 endpoint, target profile, payload shape, no-retention/rollback 기대값을 명시할 때만 수행한다.</p>
+
+  <h2>확정된 진행 방식</h2>
+  <ul>
+    <li>요구사항과 설계는 <code>grill-to-spec</code>으로 작성한다.</li>
+    <li><code>requirements.md</code> 승인 전에는 <code>design.md</code>를 만들지 않는다.</li>
+    <li><code>design.md</code> 생성 후 <code>codebase_architecture_manager</code>와 <code>system_architecture_manager</code>로 멀티에이전트 리뷰를 수행한다.</li>
+    <li>리뷰 반영 후 단일 goal을 설정하고 장기 autopilot 작업으로 구현한다.</li>
+    <li>구현은 <code>agentic-execution</code>과 <code>harnesskit-tdd</code>를 따른다.</li>
+  </ul>
+
+  <h2>자문자답으로 닫은 결정</h2>
+  <ul>
+    <li>Candidate 3은 Spool + Shipping Policy 범위까지 포함한다.</li>
+    <li>Payload 변환 전체를 단일 generic shipper로 흡수하는 Full Pipeline Unification은 이번 goal의 기본 범위에서 제외한다.</li>
+    <li><code>JsonFileSpool</code> import compatibility는 유지하되 내부 영속화 helper 성격으로 명시한다.</li>
+    <li>Spec/review artifact는 작업 branch/worktree의 SoT로 유지하고, 별도 승인 없이 공식 문서나 registry로 승격하지 않는다.</li>
+  </ul>
+
+  <h2>기능 요구사항</h2>
+  <ul>
+    <li>스풀 영속화의 파일 시스템 세부사항을 호출부에서 더 적게 알도록 정리한다.</li>
+    <li>domain-facing spool API는 enqueue, claim, ack, quarantine, requeue 같은 상태 전이 중심이어야 한다.</li>
+    <li><code>TranscriptCaptureSpool</code>과 <code>FileBackedIngressOutbox</code>의 도메인 의미는 보존한다.</li>
+    <li>전송 경계는 <code>POST /v1/ingest/enqueue</code>로 유지한다.</li>
+    <li>retry, quarantine, unreachable 처리의 의미가 transcript drain과 RAG ingress outbox 사이에서 일관되게 설명 가능해야 한다.</li>
+    <li>transcript drain과 RAG ingress outbox의 payload format 차이는 보존한다.</li>
+    <li>provider hook, transcript locator, source ref, migration command의 public CLI/API 호환성을 깨지 않는다.</li>
+    <li>raw transcript body, private locator, token, credential은 stdout/report/public metadata로 출력하지 않는다.</li>
+    <li>구현 완료 후 local runtime smoke를 통해 관련 CLI/hook/drain 경로가 실제로 실행되는지 확인한다.</li>
+    <li>구현 완료 후 read-only production-adjacent audit와 local/fake-server synthetic smoke로 <code>dendrite</code> client seam에서 리팩토링된 경로가 기능함을 증명한다.</li>
+    <li>실제 provider session을 새로 발생시키거나 private runtime locator를 직접 열람하는 검증은 별도 승인 없이는 하지 않는다.</li>
+  </ul>
+
+  <h2>비기능 요구사항</h2>
+  <table>
+    <thead><tr><th>항목</th><th>요구값</th></tr></thead>
+    <tbody>
+      <tr><td>Worktree isolation</td><td>모든 파일 변경은 dedicated branch/worktree에서 수행한다.</td></tr>
+      <tr><td>Source of truth</td><td>Phase 1은 <code>requirements.md</code>, Phase 2는 <code>design.md</code>가 SoT다.</td></tr>
+      <tr><td>TDD</td><td>behavior test를 먼저 추가하고 fail을 확인한 뒤 production code를 작성한다.</td></tr>
+      <tr><td>Verification</td><td>각 milestone은 구체적 evidence가 있어야 done 처리한다.</td></tr>
+      <tr><td>Runtime validation</td><td>단위 테스트 외에 CLI/hook/drain runtime smoke evidence를 확보한다.</td></tr>
+      <tr><td>Production validation</td><td>production-adjacent 검증은 <code>dendrite</code> client seam에서 승인된 방식으로만 수행하고, raw transcript/locator/credential을 출력하지 않는다. Live <code>POST</code> synthetic canary는 별도 승인 gate가 있을 때만 수행한다.</td></tr>
+      <tr><td>Boundary</td><td><code>dendrite</code>는 Mac thin-client이며 server/brain/GC/RAGFlow credential ownership을 갖지 않는다.</td></tr>
+      <tr><td>Compatibility</td><td>기존 CLI, hook payload, enqueue payload wire format은 변경하지 않는다.</td></tr>
+      <tr><td>Review</td><td>spec 생성 후 두 architecture reviewer의 리뷰를 받고 반영한다.</td></tr>
+      <tr><td>Documentation promotion</td><td>Spec/review artifact는 작업 SoT로만 유지하고, 별도 승인 없이 공식 문서/registry로 승격하지 않는다.</td></tr>
+    </tbody>
+  </table>
+
+  <h2>검증 완료 기준</h2>
+  <ul>
+    <li>L0 경계 게이트: <code>uv run python -m dendrite --show-boundary</code>가 boundary 문자열을 출력하고, repo instruction/boundary tests가 금지 소유권 침범을 잡아야 한다.</li>
+    <li>L1 자동 검증: <code>uv run pytest -q</code>가 통과해야 하며 client boundary, provider contracts, spool, transcript drain, transcript migrate, RAG ingress outbox 관련 tests가 포함되어야 한다.</li>
+    <li>L2 로컬 런타임 스모크: <code>transcript-capture</code>, <code>transcript-migrate --dry-run</code>, <code>transcript-drain --once</code>가 JSON report를 생성하고 raw transcript/body/locator/credential을 출력하지 않아야 한다.</li>
+    <li>L3 production-adjacent 검증: read-only audit와 local/fake-server synthetic smoke를 수행한다. Live <code>POST /v1/ingest/enqueue</code> synthetic canary, 실제 provider session 생성, real production enqueue/ship는 별도 승인 gate에서만 수행한다.</li>
+    <li>상태 전이 evidence는 network failure가 retry 가능한 상태로 남고, 영구 실패가 quarantine으로 이동하며, 성공 케이스가 ack 또는 queued 결과로 관측됨을 포함해야 한다.</li>
+  </ul>
+
+  <h2>허용 / 금지 범위</h2>
+  <ul>
+    <li>허용: locator-only capture, bounded dry-run, read-only production-adjacent audit, local/fake-server smoke, JSON report 검증, spool depth/status 검증.</li>
+    <li>별도 승인 필요: live <code>POST /v1/ingest/enqueue</code> synthetic canary, 실제 provider session 생성, 실제 production enqueue/ship, 승인된 synthetic canary가 아닌 운영 데이터 기반 검증.</li>
+    <li>금지: raw transcript body 출력, private locator 출력, token/credential 출력, <code>RAGFLOW_API_KEY</code> 취급, dataset_id/document_id 출력, <code>Ledger</code>/<code>TranscriptIngestWorker</code>/brain/server/GC 소유권 실행, SSH/Docker/RAGFlow management, direct RAGFlow write/delete/disable.</li>
+  </ul>
+
+  <h2>미결정 항목</h2>
+  <ul>
+    <li>없음. Phase 2에서 설계 중 실제 코드 제약이 요구사항 변경을 요구하면 <code>grill-to-spec</code> Phase 1로 회귀한다.</li>
+  </ul>
+</main>
+</body>
+</html>
