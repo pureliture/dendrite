@@ -22,9 +22,11 @@ RAW_TRANSCRIPT_FIELDS = {
     "transcript_content",
     "turns",
 }
-SUPPORTED_TRANSCRIPT_PROVIDERS = {"claude", "gemini", "codex", "antigravity"}
+SUPPORTED_TRANSCRIPT_PROVIDERS = {"claude", "gemini", "codex", "antigravity", "hermes"}
 SOURCE_UNPROVEN_PROVIDERS: set[str] = set()
 CODEX_SESSION_ID_PATTERN = re.compile(r"^[A-Za-z0-9_.:-]{8,160}$")
+HERMES_DEFAULT_STATE_DB = ".hermes/state.db"
+HERMES_LOCATOR_KEYS = ("hermes_db_path", "state_db_path", "session_db_path")
 PROJECT_SOURCE_PATH_KEYS = (
     "workspacePath",
     "workspace_path",
@@ -133,6 +135,8 @@ def _looks_like_provider_storage_path(value: str) -> bool:
         return True
     if _contains_subsequence(parts, [".gemini", "antigravity-cli", "brain"]):
         return True
+    if ".hermes" in parts:
+        return True
     return ".system_generated" in parts
 
 
@@ -229,6 +233,15 @@ def normalize_provider_capture_request(provider: str, payload: dict, *, project:
 def _extract_source_locator(provider: str, payload: dict) -> str:
     if provider in SOURCE_UNPROVEN_PROVIDERS:
         return ""
+    # Hermes resolves its own locator (with an existence + non-symlink guard) before
+    # the generic key loop, so the documented transcript_path key still gets the
+    # store-existence guarantee the design promises (no fabricated path).
+    if provider == "hermes":
+        locator = _resolve_hermes_session_locator(payload)
+        if locator:
+            _validate_locator_value(locator)
+            return locator
+        return ""
     for key in ("transcript_path", "transcriptPath", "source_locator", "runtime_handle"):
         value = payload.get(key)
         if isinstance(value, str) and value:
@@ -239,6 +252,32 @@ def _extract_source_locator(provider: str, payload: dict) -> str:
         if locator:
             _validate_locator_value(locator)
             return locator
+    return ""
+
+
+def _resolve_hermes_session_locator(payload: dict) -> str:
+    """Resolve the Hermes SQLite store path without reading it.
+
+    Hermes keeps every session in one SQLite store (default ``~/.hermes/state.db``,
+    override via ``HERMES_HOME``). This returns the store path only when the file
+    already exists and is not a symlink; it never opens, connects to, or queries the
+    database. An explicit-but-absent path or an absent default yields an empty locator
+    (no fabricated path).
+    """
+    for key in (*HERMES_LOCATOR_KEYS, "transcript_path", "transcriptPath", "source_locator", "runtime_handle"):
+        value = payload.get(key)
+        if isinstance(value, str) and value:
+            candidate = Path(value)
+            if candidate.is_file() and not candidate.is_symlink():
+                return str(candidate)
+            return ""
+    hermes_home = os.environ.get("HERMES_HOME")
+    if hermes_home:
+        candidate = Path(hermes_home) / "state.db"
+    else:
+        candidate = Path.home() / HERMES_DEFAULT_STATE_DB
+    if candidate.is_file() and not candidate.is_symlink():
+        return str(candidate)
     return ""
 
 
@@ -302,6 +341,8 @@ def _capture_event_type(provider: str, payload: dict) -> str:
     if provider == "antigravity" and (
         hook_event_name in {"Stop", "SessionEnd"} or payload.get("fullyIdle") is True or payload.get("terminationReason")
     ):
+        return "session_end"
+    if provider == "hermes" and hook_event_name in {"Stop", "SessionEnd", "session_end"}:
         return "session_end"
     return str(payload.get("event_type") or "session_end")
 

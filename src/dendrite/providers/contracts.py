@@ -22,13 +22,13 @@ SAFE_PAYLOAD_FIELDS = {
 
 
 def no_op_hook_response(provider: str) -> str:
-    if provider not in {"codex", "claude", "gemini", "openclaw", "antigravity"}:
+    if provider not in {"codex", "claude", "gemini", "openclaw", "antigravity", "hermes"}:
         raise ValueError(f"unsupported provider: {provider}")
     return ""
 
 
 def normalize_provider_event(provider: str, payload: dict) -> dict:
-    if provider not in {"codex", "claude", "gemini", "openclaw", "antigravity"}:
+    if provider not in {"codex", "claude", "gemini", "openclaw", "antigravity", "hermes"}:
         raise ValueError(f"unsupported provider: {provider}")
     normalized = {key: value for key, value in payload.items() if key in SAFE_PAYLOAD_FIELDS}
     normalized["provider"] = provider
@@ -40,6 +40,8 @@ def normalize_provider_event(provider: str, payload: dict) -> dict:
         _normalize_gemini_hook_event(normalized, payload)
     elif provider == "antigravity":
         _normalize_antigravity_hook_event(normalized, payload)
+    elif provider == "hermes":
+        _normalize_hermes_hook_event(normalized, payload)
     if "prompt" in payload:
         normalized["prompt_hash"] = _hash_value(payload["prompt"])
     for output_key, candidates in {
@@ -134,6 +136,28 @@ def _normalize_antigravity_hook_event(normalized: dict, payload: dict) -> None:
             session_id=str(payload.get("conversationId") or payload.get("conversation_id") or ""),
             event_type="session_end",
             reason=str(payload.get("terminationReason") or payload.get("reason") or ""),
+        )
+
+
+def _normalize_hermes_hook_event(normalized: dict, payload: dict) -> None:
+    hook_event_name = str(payload.get("hook_event_name") or "Stop")
+    if hook_event_name in {"Stop", "SessionEnd", "session_end"}:
+        _set_lifecycle_event(
+            normalized,
+            provider="hermes",
+            hook_event_name="Stop",
+            session_id=str(payload.get("session_id") or ""),
+            event_type="session_end",
+            reason=str(payload.get("reason") or ""),
+        )
+    elif hook_event_name in {"SessionStart", "session_start"}:
+        _set_lifecycle_event(
+            normalized,
+            provider="hermes",
+            hook_event_name="SessionStart",
+            session_id=str(payload.get("session_id") or ""),
+            event_type="session_start",
+            reason="",
         )
 
 

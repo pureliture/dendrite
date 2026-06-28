@@ -113,6 +113,8 @@ def drain_transcript_spool_once(
 
 def build_drain_document(request: dict) -> PackedTranscriptDocument:
     provider = str(request["provider"])
+    if provider == "hermes":
+        return _build_hermes_pointer_document(request)
     project = str(request["project"])
     locator = request.get("source_locator") or {}
     source_path = _source_path(locator.get("runtime_handle"))
@@ -178,6 +180,79 @@ def build_drain_document(request: dict) -> PackedTranscriptDocument:
     return PackedTranscriptDocument(
         kind="conversation_chunk",
         title=f"{provider} conversation chunk 1-{turn_count}",
+        body=body,
+        metadata=metadata,
+        filename=filename,
+    )
+
+
+def _build_hermes_pointer_document(request: dict) -> PackedTranscriptDocument:
+    """Ship a locator pointer for Hermes without reading its SQLite store.
+
+    Hermes keeps every session in a single SQLite store. dendrite is a thin client:
+    it never opens or parses that store. It ships only a redacted pointer (provider,
+    project, locator hashes, observed_at); session body extraction is owned by neurons.
+    """
+    project = str(request["project"])
+    locator = request.get("source_locator") or {}
+    observed_at = str(request.get("observed_at") or _now_iso())
+    session_id_hash = str(request["session_id_hash"])
+    source_locator_hash = str(locator.get("locator_hash") or "")
+    source_locator_version_hash = str(locator.get("locator_version_hash") or "")
+    content = _bounded_body(
+        [
+            "# Session Pointer",
+            "",
+            "## Context",
+            "",
+            "- provider: hermes",
+            f"- project: {project}",
+            f"- session_id_hash: {_hash_fragment(session_id_hash, 12)}",
+            f"- source_locator_hash: {_hash_fragment(source_locator_hash, 16)}",
+            "- content_kind: locator_pointer",
+            "- currentness: session_store_pointer",
+            "",
+            "## Note",
+            "",
+            "Hermes sessions live in a single SQLite store; dendrite ships only a",
+            "locator pointer. Session body extraction is owned by neurons.",
+        ]
+    )
+    body_text = redact_public_ingress_text(content)
+    metadata = {
+        "schema_version": "agent_knowledge_document.v2",
+        "result_type": "session_pointer",
+        "knowledge_id": f"kn_{_hash_fragment(_sha256(body_text), 24)}",
+        "provider": "hermes",
+        "project": project,
+        "agent_id": "hermes-transcript-capture",
+        "session_id_hash": session_id_hash,
+        "source_locator_hash": source_locator_hash,
+        "source_locator_version_hash": source_locator_version_hash,
+        "content_kind": "locator_pointer",
+        "observed_at_start": observed_at,
+        "observed_at_end": observed_at,
+        "privacy_level": "private",
+        "redaction_version": "redaction.v2",
+        "parser_version": PARSER_VERSION,
+        "source_status": str(locator.get("status") or "source_locator_private_spool_only"),
+        "domain": "agent_memory",
+        "type": "session_pointer",
+        "capture_request_id": str(request["request_id"]),
+        "provider_source_contract": "hermes-transcript-source.v1",
+        "ledger_contract": "agent_knowledge_ledger.v3",
+        "retention_policy": "private_indefinite_until_disabled",
+        "supersedes": "",
+    }
+    body = _render_markdown(metadata, body_text.splitlines())
+    content_hash = _sha256(body)
+    filename = (
+        f"ak-hermes-pointer-{_slug(project)}-{_hash_fragment(session_id_hash, 12)}"
+        f"-{_compact_utc_timestamp(observed_at)}-{_hash_fragment(content_hash, 12)}.md"
+    )
+    return PackedTranscriptDocument(
+        kind="session_pointer",
+        title="hermes session pointer",
         body=body,
         metadata=metadata,
         filename=filename,

@@ -6,7 +6,7 @@ import json
 import shlex
 
 
-SUPPORTED_PROVIDERS = {"claude", "gemini", "codex", "antigravity"}
+SUPPORTED_PROVIDERS = {"claude", "gemini", "codex", "antigravity", "hermes"}
 SUPPORTED_HOOK_ACTIONS = {"install", "uninstall"}
 
 
@@ -162,6 +162,29 @@ def build_default_provider_source_contracts() -> list[ProviderSourceContract]:
             rollback_state="not_installed_no_runtime_rollback_needed",
             evidence_hash="pending_probe",
             redacted_evidence_ref="",
+        ),
+        ProviderSourceContract(
+            contract_id="hermes-session-end-state-db.v1",
+            provider="hermes",
+            provider_version="pending_probe",
+            installed_version_evidence="pending_probe",
+            hook_event="Stop",
+            source_locator_field="session_db_path",
+            parser_version="provider-transcript-parser.v1",
+            native_parser_status="native_parser_unverified_hermes_sqlite",
+            privacy_redaction_status="privacy_redaction_unverified",
+            verification_status="source_locator_unverified",
+            source_status="source_locator_unverified",
+            hook_install_status="deferred_not_installed",
+            rollback_state="not_installed_no_runtime_rollback_needed",
+            evidence_hash="pending_probe",
+            redacted_evidence_ref="",
+            raw_prompt_policy="locator_only_not_transcript_content",
+            unsupported_reason=(
+                "hermes hook API unconfirmed; sessions live in a single SQLite store "
+                "(~/.hermes/state.db) and body extraction is deferred to neurons. dendrite "
+                "ships a locator pointer only."
+            ),
         ),
     ]
 
