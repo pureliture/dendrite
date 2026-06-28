@@ -71,7 +71,7 @@ class IngressHttpTransport:
                     raise IngressEnqueueRejected(f"ingress enqueue rejected: {rejection_status}") from exc
                 raise IngressEnqueueUnreachable(f"ingress enqueue failed: unreachable http_{exc.code}") from exc
             raise IngressEnqueueUnreachable(f"ingress enqueue failed: unreachable http_{exc.code}") from exc
-        except (urllib.error.URLError, TimeoutError) as exc:
+        except (urllib.error.URLError, TimeoutError, ConnectionError) as exc:
             raise IngressEnqueueUnreachable("ingress enqueue failed: unreachable") from exc
         if response_payload.get("accepted") is not True:
             status = str(response_payload.get("status") or "rejected")

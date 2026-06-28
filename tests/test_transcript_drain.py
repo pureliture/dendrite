@@ -175,6 +175,37 @@ def test_transcript_drain_requeues_retryable_http5xx(tmp_path, monkeypatch, caps
     assert spool.depth_counts() == {"pending": 1, "processing": 0, "acked": 0, "quarantine": 0}
 
 
+def test_transcript_drain_requeues_connection_reset(tmp_path, monkeypatch, capsys):
+    source = tmp_path / "codex-session.jsonl"
+    source.write_text('{"role":"user","content":"hello"}\n', encoding="utf-8")
+    spool = TranscriptCaptureSpool(tmp_path / "spool")
+    spool.enqueue(_capture_request(source))
+
+    def fake_urlopen(_request, timeout=None):
+        _ = timeout
+        raise ConnectionResetError("connection reset by peer")
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+
+    rc = main(
+        [
+            "transcript-drain",
+            "--once",
+            "--capture-spool",
+            str(spool.root),
+            "--ingress-url",
+            "http://127.0.0.1:18080",
+        ]
+    )
+
+    assert rc == 1
+    report = json.loads(capsys.readouterr().out)
+    assert report["status"] == "retry_pending"
+    assert report["last_error_class"] == "ingress_unreachable"
+    assert report["retry_pending_count"] == 1
+    assert spool.depth_counts() == {"pending": 1, "processing": 0, "acked": 0, "quarantine": 0}
+
+
 def test_transcript_drain_requeues_unsafe_http4xx(tmp_path, monkeypatch, capsys):
     source = tmp_path / "codex-session.jsonl"
     source.write_text('{"role":"user","content":"hello"}\n', encoding="utf-8")
