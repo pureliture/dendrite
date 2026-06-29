@@ -63,6 +63,32 @@ uv run python -m dendrite transcript-drain --once \
 # hermes 항목은 state.db를 read-only로 읽어 conversation_chunk로 전송된다.
 ```
 
+### 2c) 벌크 마이그레이션 (과거 세션 백필)
+
+기존에 쌓인 Hermes 세션을 일괄로 보낼 때는 `transcript-migrate`를 쓴다. jsonl provider와
+달리 Hermes는 `state.db`의 세션을 read-only로 열거해 세션별 locator-only request를 spool하고,
+이후 `transcript-drain`이 세션별 `conversation_chunk`로 ship한다.
+
+```bash
+# 1) 먼저 안전하게 세션 수만 확인 (read-only, 아무것도 안 보냄)
+uv run python -m dendrite transcript-migrate --spool "$HOME/.local/state/dendrite/capture-spool" \
+  --provider hermes --dry-run
+# -> by_provider.hermes.found = 세션 수
+
+# 2) 일부만 스모크 (--limit), 또는 전체 spool
+uv run python -m dendrite transcript-migrate --spool "$HOME/.local/state/dendrite/capture-spool" \
+  --provider hermes --limit 1
+
+# 3) drain으로 세션별 conversation_chunk ship
+uv run python -m dendrite transcript-drain --once \
+  --capture-spool "$HOME/.local/state/dendrite/capture-spool" \
+  --ingress-url "http://<approved-ingress-host>:18080"
+```
+
+- store 경로 override: `--source-root hermes=/path/to/state.db` (없으면 `HERMES_HOME` → 기본).
+- **멱등**: 같은 세션·같은 store 상태면 re-run해도 중복 적재되지 않는다.
+- 열거는 read-only/immutable(쓰기·checkpoint 없음), report는 카운트만(원경로/세션id/내용 미출력).
+
 ### 3) hook plan (non-mutating, deferred)
 
 ```bash

@@ -89,6 +89,38 @@ def _redact_and_bound(text: str) -> str:
     return redacted
 
 
+def enumerate_hermes_sessions(db_path) -> list[str]:
+    """Return the distinct session ids that have messages, sorted, read-only.
+
+    Opens the store with mode=ro&immutable=1 (no locks, no WAL checkpoint, never
+    written) and reads only the ``session_id`` column — never message content. When
+    the messages table has no ``session_id`` column it is treated as a single-session
+    store and ``[""]`` is returned. An unreadable/non-sqlite/missing store yields ``[]``.
+    """
+    path = Path(db_path)
+    if not path.is_file() or path.is_symlink():
+        return []
+    try:
+        conn = sqlite3.connect(f"file:{path}?mode=ro&immutable=1", uri=True)
+    except sqlite3.Error:
+        return []
+    try:
+        columns = {row[1] for row in conn.execute(f"PRAGMA table_info({HERMES_MESSAGES_TABLE})")}
+        if not columns:
+            return []
+        if "session_id" not in columns:
+            return [""]
+        rows = conn.execute(
+            f"SELECT DISTINCT session_id FROM {HERMES_MESSAGES_TABLE} "
+            "WHERE session_id IS NOT NULL ORDER BY session_id"
+        ).fetchall()
+    except sqlite3.Error:
+        return []
+    finally:
+        conn.close()
+    return [str(row[0]) for row in rows]
+
+
 def _read_hermes_session_text(path: Path, session_id: str) -> str:
     """Read one Hermes session's messages from the SQLite store, read-only.
 

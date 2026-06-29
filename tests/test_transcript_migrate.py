@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 from pathlib import Path
 
 import pytest
@@ -12,6 +13,7 @@ from dendrite.transcript_migrate import (
     migrate,
     parse_source_root_overrides,
 )
+from dendrite.transcript_source import enumerate_hermes_sessions
 
 
 def _make_session(root: Path, rel: str) -> Path:
@@ -142,3 +144,122 @@ def test_parse_source_root_overrides_rejects_bad(tmp_path):
         parse_source_root_overrides(["nopath"])
     with pytest.raises(ValueError):
         parse_source_root_overrides(["unknownprovider=/x"])
+
+
+# --- hermes (SQLite store) migration -----------------------------------------
+
+
+def _make_hermes_db(path: Path, sessions: dict[str, list[tuple[str, str]]]) -> None:
+    conn = sqlite3.connect(str(path))
+    try:
+        conn.execute(
+            "CREATE TABLE messages (id INTEGER PRIMARY KEY AUTOINCREMENT, "
+            "session_id TEXT, role TEXT, content TEXT, timestamp INTEGER)"
+        )
+        ts = 0
+        for sid, msgs in sessions.items():
+            for role, content in msgs:
+                conn.execute(
+                    "INSERT INTO messages (session_id, role, content, timestamp) VALUES (?, ?, ?, ?)",
+                    (sid, role, content, ts),
+                )
+                ts += 1
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _make_hermes_db_no_session_col(path: Path) -> None:
+    conn = sqlite3.connect(str(path))
+    try:
+        conn.execute("CREATE TABLE messages (id INTEGER PRIMARY KEY, role TEXT, content TEXT)")
+        conn.execute("INSERT INTO messages (role, content) VALUES ('user', 'hi')")
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def test_enumerate_hermes_sessions_distinct_sorted(tmp_path):
+    db = tmp_path / "state.db"
+    _make_hermes_db(db, {"s-b": [("user", "x")], "s-a": [("user", "y"), ("assistant", "z")]})
+    assert enumerate_hermes_sessions(db) == ["s-a", "s-b"]
+
+
+def test_enumerate_hermes_single_session_when_no_session_col(tmp_path):
+    db = tmp_path / "state.db"
+    _make_hermes_db_no_session_col(db)
+    assert enumerate_hermes_sessions(db) == [""]
+
+
+def test_enumerate_hermes_empty_for_non_sqlite(tmp_path):
+    f = tmp_path / "state.db"
+    f.write_text("not a sqlite database\n", encoding="utf-8")
+    assert enumerate_hermes_sessions(f) == []
+
+
+def test_enumerate_hermes_is_read_only(tmp_path):
+    db = tmp_path / "state.db"
+    _make_hermes_db(db, {"s": [("user", "x")]})
+    before = db.stat()
+    enumerate_hermes_sessions(db)
+    after = db.stat()
+    assert (after.st_mtime_ns, after.st_size) == (before.st_mtime_ns, before.st_size)
+
+
+def test_hermes_migrate_dry_run_counts_sessions(tmp_path):
+    db = tmp_path / "state.db"
+    _make_hermes_db(db, {"a": [("u", "1")], "b": [("u", "2")], "c": [("u", "3")]})
+    spool = tmp_path / "spool"
+    report = migrate(spool_root=spool, roots={"hermes": db}, providers=["hermes"], dry_run=True)
+    assert report["by_provider"]["hermes"]["found"] == 3
+    assert not spool.exists() or not list((spool / "pending").glob("*.json"))
+
+
+def test_hermes_migrate_spools_per_session_locator_only(tmp_path):
+    db = tmp_path / "state.db"
+    _make_hermes_db(db, {"a": [("u", "1")], "b": [("u", "2")]})
+    spool = tmp_path / "spool"
+    report = migrate(spool_root=spool, roots={"hermes": db}, providers=["hermes"])
+    assert report["by_provider"]["hermes"]["spooled"] == 2
+
+    pending = sorted((spool / "pending").glob("*.json"))
+    assert len(pending) == 2
+    sids = set()
+    for f in pending:
+        req = json.loads(f.read_text(encoding="utf-8"))
+        assert req["provider"] == "hermes"
+        assert req["content_policy"] == "locator_only"
+        assert req["source_locator"]["runtime_handle"] == str(db)
+        sids.add(req["session_id"])
+        assert str(db) not in json.dumps(req["public_summary"], sort_keys=True)
+    assert sids == {"a", "b"}
+
+
+def test_hermes_migrate_limit(tmp_path):
+    db = tmp_path / "state.db"
+    _make_hermes_db(db, {"a": [("u", "1")], "b": [("u", "2")], "c": [("u", "3")]})
+    spool = tmp_path / "spool"
+    report = migrate(spool_root=spool, roots={"hermes": db}, providers=["hermes"], limit=1)
+    assert report["by_provider"]["hermes"]["spooled"] == 1
+    assert len(list((spool / "pending").glob("*.json"))) == 1
+
+
+def test_hermes_migrate_is_idempotent(tmp_path):
+    db = tmp_path / "state.db"
+    _make_hermes_db(db, {"a": [("u", "1")], "b": [("u", "2")]})
+    spool = tmp_path / "spool"
+    migrate(spool_root=spool, roots={"hermes": db}, providers=["hermes"])
+    migrate(spool_root=spool, roots={"hermes": db}, providers=["hermes"])
+    # second run must not create duplicate spool files
+    assert len(list((spool / "pending").glob("*.json"))) == 2
+
+
+def test_hermes_migrate_root_unavailable(tmp_path):
+    report = migrate(
+        spool_root=tmp_path / "s",
+        roots={"hermes": tmp_path / "missing.db"},
+        providers=["hermes"],
+        dry_run=True,
+    )
+    assert report["by_provider"]["hermes"]["status"] == "root_unavailable"
+    assert report["spooled"] == 0
