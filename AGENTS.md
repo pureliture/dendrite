@@ -31,6 +31,9 @@ Allowed:
 
 - provider hook payload normalization
 - locator-only local capture/spool/outbox
+- thin shipper reads each provider's local session source through a source adapter
+  (jsonl text file, or a read-only structured store such as the Hermes SQLite store)
+  and forwards a redacted transcript (`conversation_chunk`)
 - thin shipper enqueue to `POST 18080`
 - public/redacted enqueue payload contract
 - local-only diagnostics and dry-run hook plans
@@ -49,8 +52,10 @@ Forbidden by default:
 
 ## Safety Lines
 
-- Do not read raw private transcript/source contents unless the user explicitly
-  asks for that exact access.
+- Do not print or expose raw private transcript/source contents. The thin shipper
+  may read a provider's local source to produce a redacted transcript, but
+  structured stores (e.g. Hermes SQLite) are opened read-only/immutable only — never
+  written, and no WAL checkpoint is triggered.
 - Do not print private locators, raw private paths, tokens, cookies, bearer
   strings, API keys, raw transcript body, raw dataset_id, or raw document_id.
 - Provider hooks must stay locator-only. They may write private spool requests

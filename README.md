@@ -183,10 +183,17 @@ query, native memory, GC safety는 `neurons` 책임이다.
   <img src="https://img.shields.io/badge/codex-hook-412991?style=flat-square&logo=openai&logoColor=white" alt="codex" />
   <img src="https://img.shields.io/badge/gemini-hook-4285F4?style=flat-square&logo=googlegemini&logoColor=white" alt="gemini" />
   <img src="https://img.shields.io/badge/antigravity-hook-4B8BBE?style=flat-square" alt="antigravity" />
+  <img src="https://img.shields.io/badge/hermes-sqlite-9333ea?style=flat-square" alt="hermes" />
 </p>
 
 각 provider hook은 자기 payload를 normalize해 동일한 locator-only capture request로 모은다.
 hook은 RAGFlow·NATS·Docker·SSH·GC를 호출하지 않는다.
+
+provider 소스 읽기는 **source adapter 인터페이스 1개**로 통합된다. jsonl provider는 파일
+텍스트 adapter를, `hermes`는 단일 SQLite store(`~/.hermes/state.db`)를 **read-only**로 읽는
+adapter를 쓴다. 둘 다 동일한 `conversation_chunk`로 ship되어 `neurons`가 그대로 수용한다.
+session-memory build/GC/RAGFlow write는 dendrite가 아니라 `neurons` 책임이다.
+자세한 enable 방법·안전 경계·샘플 설정은 [`docs/HERMES_PROVIDER.md`](docs/HERMES_PROVIDER.md).
 
 <br/>
 

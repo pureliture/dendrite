@@ -1,1 +1,1 @@
-__all__ = ["codex", "claude", "gemini", "openclaw"]
+__all__ = ["codex", "claude", "gemini", "openclaw", "hermes"]

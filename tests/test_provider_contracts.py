@@ -14,12 +14,20 @@ from dendrite.providers.contracts import no_op_hook_response, normalize_provider
 def test_default_provider_source_contracts_are_locator_only() -> None:
     contracts = {contract.provider: contract for contract in build_default_provider_source_contracts()}
 
-    assert set(contracts) == {"claude", "gemini", "codex", "antigravity"}
+    assert set(contracts) == {"claude", "gemini", "codex", "antigravity", "hermes"}
     assert contracts["codex"].raw_prompt_policy == "locator_only_not_transcript_content"
-    for contract in contracts.values():
+    # The four live-smoked providers store per-session jsonl and are locator-verified.
+    for name in ("claude", "gemini", "codex", "antigravity"):
+        contract = contracts[name]
         assert contract.source_locator_field == "transcript_path"
         assert contract.hook_install_status == "deferred_not_installed"
         assert contract.source_status == "source_locator_verified"
+    # Hermes is registered but intentionally unverified: its store is a single
+    # SQLite DB and it has not been live-smoked, so it must not claim a verified
+    # source locator. It is still deferred (never auto-installed).
+    hermes = contracts["hermes"]
+    assert hermes.hook_install_status == "deferred_not_installed"
+    assert hermes.source_status != "source_locator_verified"
 
 
 def test_provider_doctor_report_is_non_mutating() -> None:

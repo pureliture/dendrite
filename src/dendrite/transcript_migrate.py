@@ -24,20 +24,28 @@ from .transcript_capture import (
     TranscriptCaptureSpool,
     normalize_provider_capture_request,
 )
+from .transcript_source import enumerate_hermes_sessions
 
-MIGRATION_PROVIDERS = ("codex", "claude", "gemini", "antigravity")
+MIGRATION_PROVIDERS = ("codex", "claude", "gemini", "antigravity", "hermes")
 SESSION_GLOB = "**/*.jsonl"
 
 
 def default_source_roots() -> dict[str, Path]:
-    """Best-effort per-provider session-store roots (override as needed)."""
+    """Best-effort per-provider session-store roots (override as needed).
+
+    Note: codex/claude/gemini/antigravity roots are directories of jsonl session
+    files; the hermes root is a single SQLite store file (~/.hermes/state.db).
+    """
     home = Path.home()
     codex_home = Path(os.environ.get("CODEX_HOME") or (home / ".codex"))
+    hermes_home = os.environ.get("HERMES_HOME")
+    hermes_db = (Path(hermes_home) / "state.db") if hermes_home else (home / ".hermes" / "state.db")
     return {
         "codex": codex_home / "sessions",
         "claude": home / ".claude" / "projects",
         "gemini": home / ".gemini",
         "antigravity": home / ".antigravity",
+        "hermes": hermes_db,
     }
 
 
@@ -57,6 +65,16 @@ def build_migration_request(provider: str, path: Path, *, project: str = "") -> 
     """
     payload = {"transcript_path": str(path)}
     return normalize_provider_capture_request(provider, payload, project=project)
+
+
+def build_hermes_migration_request(db_path: Path, session_id: str, *, project: str = "") -> dict:
+    """Build a locator-only capture request for one historical Hermes session.
+
+    The locator is the SQLite store path; the (private) session id selects which
+    session the drain's SQLite adapter extracts. Body is never read here.
+    """
+    payload = {"transcript_path": str(db_path), "session_id": session_id}
+    return normalize_provider_capture_request("hermes", payload, project=project)
 
 
 @dataclass
@@ -98,44 +116,83 @@ def migrate(
         if provider not in SUPPORTED_TRANSCRIPT_PROVIDERS:
             report.by_provider[provider] = {"status": "unsupported_provider", "found": 0, "spooled": 0, "errors": 0}
             continue
-        root = roots.get(provider)
-        if not root or not Path(root).is_dir():
-            report.by_provider[provider] = {
-                "status": "root_unavailable",
-                "root": str(root or ""),
-                "found": 0,
-                "spooled": 0,
-                "errors": 0,
-            }
-            continue
-
-        files = enumerate_sessions(Path(root))
-        if limit is not None:
-            files = files[: max(limit, 0)]
-        prov_spooled = 0
-        prov_errors = 0
-        for path in files:
-            try:
-                request = build_migration_request(provider, path, project=project)
-                if not dry_run:
-                    spool.enqueue(request)
-                prov_spooled += 1
-            except Exception as exc:  # noqa: BLE001 - per-file fail-soft; count + continue
-                prov_errors += 1
-                name = exc.__class__.__name__
-                report.error_classes[name] = report.error_classes.get(name, 0) + 1
-
-        report.by_provider[provider] = {
-            "status": "ok",
-            "root": str(root),
-            "found": len(files),
-            "spooled": prov_spooled,
-            "errors": prov_errors,
-        }
-        report.spooled += prov_spooled
-        report.errors += prov_errors
+        if provider == "hermes":
+            summary = _migrate_hermes(
+                roots.get("hermes"), spool, project=project, limit=limit, dry_run=dry_run, report=report
+            )
+        else:
+            summary = _migrate_jsonl(
+                provider, roots.get(provider), spool, project=project, limit=limit, dry_run=dry_run, report=report
+            )
+        report.by_provider[provider] = summary
+        report.spooled += summary["spooled"]
+        report.errors += summary["errors"]
 
     return report.as_dict()
+
+
+def _migrate_jsonl(
+    provider: str,
+    root: Path | None,
+    spool: TranscriptCaptureSpool | None,
+    *,
+    project: str,
+    limit: int | None,
+    dry_run: bool,
+    report: MigrationReport,
+) -> dict:
+    """Migrate a directory of per-session jsonl files (codex/claude/gemini/antigravity)."""
+    if not root or not Path(root).is_dir():
+        return {"status": "root_unavailable", "root": str(root or ""), "found": 0, "spooled": 0, "errors": 0}
+    files = enumerate_sessions(Path(root))
+    if limit is not None:
+        files = files[: max(limit, 0)]
+    spooled = 0
+    errors = 0
+    for path in files:
+        try:
+            request = build_migration_request(provider, path, project=project)
+            if not dry_run:
+                spool.enqueue(request)
+            spooled += 1
+        except Exception as exc:  # noqa: BLE001 - per-file fail-soft; count + continue
+            errors += 1
+            name = exc.__class__.__name__
+            report.error_classes[name] = report.error_classes.get(name, 0) + 1
+    return {"status": "ok", "root": str(root), "found": len(files), "spooled": spooled, "errors": errors}
+
+
+def _migrate_hermes(
+    root: Path | None,
+    spool: TranscriptCaptureSpool | None,
+    *,
+    project: str,
+    limit: int | None,
+    dry_run: bool,
+    report: MigrationReport,
+) -> dict:
+    """Migrate a single SQLite store by enumerating its sessions (read-only).
+
+    The report carries counts only — never the raw store path or session ids.
+    """
+    if not root or not Path(root).is_file():
+        return {"status": "root_unavailable", "found": 0, "spooled": 0, "errors": 0}
+    sessions = enumerate_hermes_sessions(root)
+    if limit is not None:
+        sessions = sessions[: max(limit, 0)]
+    spooled = 0
+    errors = 0
+    for session_id in sessions:
+        try:
+            request = build_hermes_migration_request(Path(root), session_id, project=project)
+            if not dry_run:
+                spool.enqueue(request)
+            spooled += 1
+        except Exception as exc:  # noqa: BLE001 - per-session fail-soft; count + continue
+            errors += 1
+            name = exc.__class__.__name__
+            report.error_classes[name] = report.error_classes.get(name, 0) + 1
+    return {"status": "ok", "found": len(sessions), "spooled": spooled, "errors": errors}
 
 
 def parse_source_root_overrides(values: list[str] | None) -> dict[str, Path]:
@@ -155,6 +212,7 @@ def parse_source_root_overrides(values: list[str] | None) -> dict[str, Path]:
 __all__ = [
     "MIGRATION_PROVIDERS",
     "MigrationReport",
+    "build_hermes_migration_request",
     "build_migration_request",
     "default_source_roots",
     "enumerate_sessions",
