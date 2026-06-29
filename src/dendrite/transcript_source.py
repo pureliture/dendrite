@@ -108,7 +108,12 @@ def _read_hermes_session_text(path: Path, session_id: str) -> str:
             raise ValueError("source_unreadable")
         order_by = "timestamp" if "timestamp" in columns else "rowid"
         where, params = "", ()
-        if session_id and "session_id" in columns:
+        if "session_id" in columns:
+            # Multi-session store: a session id is required to isolate one session.
+            # Refuse (quarantine) rather than read every session, which would leak
+            # other sessions' content into one shipped chunk.
+            if not session_id:
+                raise ValueError("source_unreadable")
             where, params = "WHERE session_id = ?", (session_id,)
         select = "role, content" if "role" in columns else "content"
         query = f"SELECT {select} FROM {HERMES_MESSAGES_TABLE} {where} ORDER BY {order_by}"

@@ -316,6 +316,39 @@ def test_hermes_drain_reads_store_read_only_and_does_not_modify(tmp_path):
     assert not (tmp_path / "state.db-journal").exists()
 
 
+def test_hermes_drain_refuses_when_session_id_missing_in_multisession_store(tmp_path):
+    # If the store holds many sessions but the request has no session_id, dendrite must
+    # NOT dump every session — refuse (quarantine), never a cross-session leak.
+    db = tmp_path / "state.db"
+    _write_hermes_state_db(
+        db,
+        messages=[("user", SESSION_CONTENT)],
+        other=(OTHER_SESSION_ID, [("user", OTHER_CONTENT)]),
+    )
+    payload = {
+        "hook_event_name": "on_session_end",
+        # deliberately no session_id
+        "transcript_path": str(db),
+        "workspacePaths": ["/Users/ddalkak/Projects/dendrite"],
+    }
+    request = normalize_provider_capture_request("hermes", payload, project=PROJECT)
+    assert request["session_id"] == ""
+    spool = TranscriptCaptureSpool(tmp_path / "capture-spool")
+    spool.enqueue(request)
+    ingress = _RecordingIngress()
+
+    report = drain_transcript_spool_once(
+        capture_spool=spool,
+        ingress=ingress,
+        target_profile="ragflow-transcript-memory",
+        max_items=5,
+    )
+
+    assert ingress.calls == []
+    assert report["status"] == "quarantined"
+    assert spool.depth_counts()["quarantine"] == 1
+
+
 def test_hermes_drain_quarantines_unreadable_store(tmp_path):
     # A store that is not a valid SQLite db must be quarantined, not crash the drain.
     db = tmp_path / "state.db"
