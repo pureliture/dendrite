@@ -141,7 +141,7 @@ def _normalize_antigravity_hook_event(normalized: dict, payload: dict) -> None:
 
 def _normalize_hermes_hook_event(normalized: dict, payload: dict) -> None:
     hook_event_name = str(payload.get("hook_event_name") or "Stop")
-    if hook_event_name in {"Stop", "SessionEnd", "session_end"}:
+    if hook_event_name in {"Stop", "SessionEnd", "session_end", "session:end", "on_session_end", "on_session_finalize"}:
         _set_lifecycle_event(
             normalized,
             provider="hermes",
@@ -150,7 +150,7 @@ def _normalize_hermes_hook_event(normalized: dict, payload: dict) -> None:
             event_type="session_end",
             reason=str(payload.get("reason") or ""),
         )
-    elif hook_event_name in {"SessionStart", "session_start"}:
+    elif hook_event_name in {"SessionStart", "session_start", "session:start", "on_session_start"}:
         _set_lifecycle_event(
             normalized,
             provider="hermes",

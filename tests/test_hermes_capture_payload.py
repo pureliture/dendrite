@@ -1,10 +1,11 @@
 """Hermes provider capture tests.
 
-Hermes Agent (Nous Research) stores all sessions in a single SQLite store
-(`~/.hermes/state.db`), not per-session jsonl files. dendrite therefore treats
-Hermes as a locator-only *pointer* provider: it records the store locator and
-safe metadata, never opens or parses the SQLite body, and defers session body
-extraction to neurons. These tests pin that contract.
+Hermes Agent (Nous Research) stores all sessions in one local SQLite store
+(`~/.hermes/state.db`), not per-session jsonl files. dendrite captures locator-only
+(it records the store path, never the body, at capture time), and at drain time a
+HermesSqliteSourceAdapter opens the store read-only/immutable, selects the one
+session, and ships the same redacted `conversation_chunk` as the jsonl providers.
+These tests pin that contract.
 """
 
 import hashlib
@@ -30,22 +31,50 @@ from dendrite.transcript_drain import drain_transcript_spool_once
 
 PROJECT = "dendrite"
 HERMES_SESSION_ID = "hermes-sess-01HXAAAAAAAAAAAAAAAAAAAAAA"
-DB_BODY_SENTINEL = "SQLITE_PRIVATE_BODY_SENTINEL_must_never_ship"
+SESSION_CONTENT = "hello from hermes session alpha"
+OTHER_SESSION_ID = "hermes-sess-OTHERBBBBBBBBBBBBBBBBBBBBBB"
+OTHER_CONTENT = "this belongs to a different session beta"
+SECRET_PATH = "/Users/ddalkak/private/secret-token-path"
 
 
 def _hermes_session_payload(state_db_path: str) -> dict:
     """Hermes session-end payload with an explicit SQLite store locator."""
     return {
-        "hook_event_name": "Stop",
+        "hook_event_name": "on_session_end",
         "session_id": HERMES_SESSION_ID,
         "transcript_path": state_db_path,
         "workspacePaths": ["/Users/ddalkak/Projects/dendrite"],
     }
 
 
-def _write_fake_state_db(path) -> None:
-    # A stand-in for the real SQLite store. The bytes must never reach the wire.
-    path.write_text(DB_BODY_SENTINEL + "\nbinary-ish-content\n", encoding="utf-8")
+def _write_hermes_state_db(path, *, session_id=HERMES_SESSION_ID, messages=None, other=None) -> None:
+    """Create a stand-in Hermes SQLite store (sessions + messages tables)."""
+    if messages is None:
+        messages = [("user", SESSION_CONTENT), ("assistant", "ok")]
+    conn = sqlite3.connect(str(path))
+    try:
+        conn.execute("CREATE TABLE sessions (id TEXT PRIMARY KEY, started_at INTEGER)")
+        conn.execute(
+            "CREATE TABLE messages (id INTEGER PRIMARY KEY AUTOINCREMENT, "
+            "session_id TEXT, role TEXT, content TEXT, timestamp INTEGER)"
+        )
+        conn.execute("INSERT INTO sessions (id, started_at) VALUES (?, ?)", (session_id, 1))
+        for i, (role, content) in enumerate(messages):
+            conn.execute(
+                "INSERT INTO messages (session_id, role, content, timestamp) VALUES (?, ?, ?, ?)",
+                (session_id, role, content, i),
+            )
+        if other is not None:
+            other_id, other_messages = other
+            conn.execute("INSERT INTO sessions (id, started_at) VALUES (?, ?)", (other_id, 2))
+            for i, (role, content) in enumerate(other_messages):
+                conn.execute(
+                    "INSERT INTO messages (session_id, role, content, timestamp) VALUES (?, ?, ?, ?)",
+                    (other_id, role, content, 100 + i),
+                )
+        conn.commit()
+    finally:
+        conn.close()
 
 
 class _RecordingIngress:
@@ -80,8 +109,7 @@ def test_hermes_contract_is_registered_but_unverified():
     assert "hermes" in contracts
     hermes = contracts["hermes"]
     assert hermes.hook_install_status == "deferred_not_installed"
-    # Hermes has not been live-smoked and its store is SQLite, so it must not
-    # claim a verified source locator.
+    # Not live-smoked against a real Hermes install: must not claim a verified locator.
     assert hermes.source_status != "source_locator_verified"
 
 
@@ -97,7 +125,7 @@ def test_hermes_hook_plan_is_non_mutating_and_deferred():
 
 def test_hermes_event_normalizer_maps_session_end():
     normalized = normalize_provider_event(
-        "hermes", {"hook_event_name": "Stop", "session_id": "s1"}
+        "hermes", {"hook_event_name": "on_session_end", "session_id": "s1"}
     )
     assert normalized["provider"] == "hermes"
     assert normalized["event_type"] == "session_end"
@@ -110,9 +138,9 @@ def test_no_op_hook_response_accepts_hermes():
 # --- locator-only capture -------------------------------------------------
 
 
-def test_hermes_capture_is_locator_only_from_explicit_path(tmp_path):
+def test_hermes_capture_is_locator_only(tmp_path):
     db = tmp_path / "state.db"
-    _write_fake_state_db(db)
+    _write_hermes_state_db(db)
 
     request = normalize_provider_capture_request(
         "hermes", _hermes_session_payload(str(db)), project=PROJECT
@@ -124,15 +152,26 @@ def test_hermes_capture_is_locator_only_from_explicit_path(tmp_path):
     assert locator["raw_path_present"] is True
     assert locator["locator_hash"].startswith("sha256:")
     assert locator["locator_version_hash"].startswith("sha256:")
-    # raw path and raw body must never reach the public surface
-    public = json.dumps(request["public_summary"], sort_keys=True)
-    assert str(db) not in public
-    assert DB_BODY_SENTINEL not in json.dumps(request, sort_keys=True)
+    # capture never reads the store body, and the raw path stays out of public surfaces
+    assert SESSION_CONTENT not in json.dumps(request, sort_keys=True)
+    assert str(db) not in json.dumps(request["public_summary"], sort_keys=True)
+
+
+def test_hermes_capture_keeps_raw_session_id_private(tmp_path):
+    db = tmp_path / "state.db"
+    _write_hermes_state_db(db)
+    request = normalize_provider_capture_request(
+        "hermes", _hermes_session_payload(str(db)), project=PROJECT
+    )
+    # raw session id is kept (privately) so the SQLite adapter can select the session,
+    # but it must never appear in the public summary.
+    assert request["session_id"] == HERMES_SESSION_ID
+    assert HERMES_SESSION_ID not in json.dumps(request["public_summary"], sort_keys=True)
 
 
 def test_hermes_session_hash_uses_provider_prefixed_scheme(tmp_path):
     db = tmp_path / "state.db"
-    _write_fake_state_db(db)
+    _write_hermes_state_db(db)
     request = normalize_provider_capture_request(
         "hermes", _hermes_session_payload(str(db)), project=PROJECT
     )
@@ -144,10 +183,10 @@ def test_hermes_capture_resolves_default_db_from_hermes_home(tmp_path, monkeypat
     home = tmp_path / "hermes-home"
     home.mkdir()
     db = home / "state.db"
-    _write_fake_state_db(db)
+    _write_hermes_state_db(db)
     monkeypatch.setenv("HERMES_HOME", str(home))
     payload = {
-        "hook_event_name": "Stop",
+        "hook_event_name": "on_session_end",
         "session_id": HERMES_SESSION_ID,
         "workspacePaths": ["/Users/ddalkak/Projects/dendrite"],
     }
@@ -161,21 +200,18 @@ def test_hermes_capture_resolves_default_db_from_hermes_home(tmp_path, monkeypat
 def test_hermes_capture_yields_no_source_when_db_absent(tmp_path, monkeypatch):
     monkeypatch.setenv("HERMES_HOME", str(tmp_path / "missing-home"))
     payload = {
-        "hook_event_name": "Stop",
+        "hook_event_name": "on_session_end",
         "session_id": HERMES_SESSION_ID,
         "workspacePaths": ["/Users/ddalkak/Projects/dendrite"],
     }
 
     request = normalize_provider_capture_request("hermes", payload, project=PROJECT)
 
-    # No fabricated locator when the store is absent.
     assert request["source_locator"]["runtime_handle"] == ""
     assert request["source_locator"]["raw_path_present"] is False
 
 
 def test_hermes_capture_does_not_fabricate_locator_for_absent_explicit_path(tmp_path):
-    # An explicit transcript_path that does not exist must not be fabricated into a
-    # locator: existence is verified even for the generic happy-path key.
     payload = _hermes_session_payload(str(tmp_path / "does-not-exist" / "state.db"))
 
     request = normalize_provider_capture_request("hermes", payload, project=PROJECT)
@@ -186,12 +222,13 @@ def test_hermes_capture_does_not_fabricate_locator_for_absent_explicit_path(tmp_
 
 def test_hermes_capture_rejects_symlinked_store(tmp_path):
     real = tmp_path / "real-state.db"
-    _write_fake_state_db(real)
+    _write_hermes_state_db(real)
     link = tmp_path / "state.db"
     link.symlink_to(real)
-    payload = _hermes_session_payload(str(link))
 
-    request = normalize_provider_capture_request("hermes", payload, project=PROJECT)
+    request = normalize_provider_capture_request(
+        "hermes", _hermes_session_payload(str(link)), project=PROJECT
+    )
 
     assert request["source_locator"]["runtime_handle"] == ""
     assert request["source_locator"]["raw_path_present"] is False
@@ -199,7 +236,7 @@ def test_hermes_capture_rejects_symlinked_store(tmp_path):
 
 def test_hermes_capture_rejects_raw_transcript_content(tmp_path):
     db = tmp_path / "state.db"
-    _write_fake_state_db(db)
+    _write_hermes_state_db(db)
     payload = _hermes_session_payload(str(db))
     payload["transcript"] = "user: raw private turn"
 
@@ -207,64 +244,82 @@ def test_hermes_capture_rejects_raw_transcript_content(tmp_path):
         normalize_provider_capture_request("hermes", payload, project=PROJECT)
 
 
-def test_hermes_capture_and_drain_never_read_the_store(tmp_path, monkeypatch):
-    # The real risk is dendrite reading the SQLite store at all (sqlite3 OR a plain
-    # open/read). Spy on the actual read vectors and assert the store path is never
-    # read during capture + drain. (sqlite3 is also checked, though dendrite never
-    # imports it, to guard against a future regression that adds it.)
-    import builtins
-    import pathlib
+# --- drain: SQLite adapter -> conversation_chunk --------------------------
 
-    db = tmp_path / "state.db"
-    _write_fake_state_db(db)
-    read_targets: list[str] = []
-    connect_calls: list = []
-    real_open = builtins.open
-    real_read_text = pathlib.Path.read_text
-    real_read_bytes = pathlib.Path.read_bytes
 
-    def spy_open(file, *a, **k):
-        read_targets.append(str(file))
-        return real_open(file, *a, **k)
-
-    def spy_read_text(self, *a, **k):
-        read_targets.append(str(self))
-        return real_read_text(self, *a, **k)
-
-    def spy_read_bytes(self, *a, **k):
-        read_targets.append(str(self))
-        return real_read_bytes(self, *a, **k)
-
-    monkeypatch.setattr(builtins, "open", spy_open)
-    monkeypatch.setattr(pathlib.Path, "read_text", spy_read_text)
-    monkeypatch.setattr(pathlib.Path, "read_bytes", spy_read_bytes)
-    monkeypatch.setattr(sqlite3, "connect", lambda *a, **k: connect_calls.append((a, k)))
-
+def _capture_and_drain(tmp_path, db):
     request = normalize_provider_capture_request(
         "hermes", _hermes_session_payload(str(db)), project=PROJECT
     )
     spool = TranscriptCaptureSpool(tmp_path / "capture-spool")
     spool.enqueue(request)
-    drain_transcript_spool_once(
+    ingress = _RecordingIngress()
+    report = drain_transcript_spool_once(
         capture_spool=spool,
-        ingress=_RecordingIngress(),
+        ingress=ingress,
         target_profile="ragflow-transcript-memory",
         max_items=5,
     )
-
-    assert str(db) not in read_targets
-    assert connect_calls == []
+    return report, ingress
 
 
-# --- drain: locator pointer ship ------------------------------------------
-
-
-def test_hermes_drain_defers_without_shipping_by_default(tmp_path):
-    # neurons has no pointer contract yet (its ingress allowlist rejects the pointer
-    # kind), so dendrite must HOLD hermes captures instead of shipping them. Default
-    # drain defers: no POST, no quarantine, the item parks in the deferred state.
+def test_hermes_drain_ships_conversation_chunk_for_the_session(tmp_path):
     db = tmp_path / "state.db"
-    _write_fake_state_db(db)
+    _write_hermes_state_db(
+        db,
+        messages=[("user", SESSION_CONTENT), ("assistant", "ok")],
+        other=(OTHER_SESSION_ID, [("user", OTHER_CONTENT)]),
+    )
+
+    report, ingress = _capture_and_drain(tmp_path, db)
+
+    assert report["status"] == "queued"
+    assert len(ingress.calls) == 1
+    call = ingress.calls[0]
+    # Hermes ships the SAME document kind as the jsonl providers — neurons accepts it.
+    assert call["kind"] == "conversation_chunk"
+    body = call["packed"].body
+    assert "## Transcript" in body
+    assert SESSION_CONTENT in body
+    # only the requested session is shipped, not other sessions in the same store
+    assert OTHER_CONTENT not in body
+    # raw store path never reaches the shipped surfaces
+    metadata_json = json.dumps(call["packed"].metadata, sort_keys=True)
+    for surface in (body, metadata_json, json.dumps(call["source"], sort_keys=True)):
+        assert str(db) not in surface
+        assert HERMES_SESSION_ID not in surface
+
+
+def test_hermes_drain_redacts_secrets_from_db_content(tmp_path):
+    db = tmp_path / "state.db"
+    _write_hermes_state_db(db, messages=[("user", f"see {SECRET_PATH} please"), ("assistant", "ok")])
+
+    _report, ingress = _capture_and_drain(tmp_path, db)
+
+    body = ingress.calls[0]["packed"].body
+    # the private path from the message content must be redacted before shipping
+    assert SECRET_PATH not in body
+
+
+def test_hermes_drain_reads_store_read_only_and_does_not_modify(tmp_path):
+    db = tmp_path / "state.db"
+    _write_hermes_state_db(db)
+    before = db.stat()
+
+    report, ingress = _capture_and_drain(tmp_path, db)
+
+    after = db.stat()
+    assert report["status"] == "queued"
+    assert (after.st_mtime_ns, after.st_size) == (before.st_mtime_ns, before.st_size)
+    # no rollback journal / WAL sidecar files were created by our read
+    assert not (tmp_path / "state.db-wal").exists()
+    assert not (tmp_path / "state.db-journal").exists()
+
+
+def test_hermes_drain_quarantines_unreadable_store(tmp_path):
+    # A store that is not a valid SQLite db must be quarantined, not crash the drain.
+    db = tmp_path / "state.db"
+    db.write_text("not a sqlite database at all\n", encoding="utf-8")
     request = normalize_provider_capture_request(
         "hermes", _hermes_session_payload(str(db)), project=PROJECT
     )
@@ -280,48 +335,8 @@ def test_hermes_drain_defers_without_shipping_by_default(tmp_path):
     )
 
     assert ingress.calls == []
-    assert report["status"] == "deferred"
-    assert report["ship_deferred_count"] == 1
-    assert report["quarantined_count"] == 0
-    assert report["network_used"] is False
-    assert spool.deferred_count() == 1
-    # active pipeline depth shape is unchanged (deferred is parked outside it)
-    assert spool.depth_counts() == {"pending": 0, "processing": 0, "acked": 0, "quarantine": 0}
-
-
-def test_hermes_drain_ships_locator_pointer_when_enabled(tmp_path):
-    # When the neurons pointer contract is live, ship is enabled and hermes ships a
-    # locator pointer — still without ever reading the SQLite body.
-    db = tmp_path / "state.db"
-    _write_fake_state_db(db)
-    request = normalize_provider_capture_request(
-        "hermes", _hermes_session_payload(str(db)), project=PROJECT
-    )
-    spool = TranscriptCaptureSpool(tmp_path / "capture-spool")
-    spool.enqueue(request)
-    ingress = _RecordingIngress()
-
-    report = drain_transcript_spool_once(
-        capture_spool=spool,
-        ingress=ingress,
-        target_profile="ragflow-transcript-memory",
-        max_items=5,
-        hermes_ship_enabled=True,
-    )
-
-    assert report["status"] == "queued"
-    assert len(ingress.calls) == 1
-    call = ingress.calls[0]
-    assert call["kind"] == "session_pointer"
-    packed = call["packed"]
-    # The SQLite body and the raw store path must never be shipped — in body OR in
-    # metadata (metadata ships verbatim to the wire with no ship-time redaction).
-    metadata_json = json.dumps(packed.metadata, sort_keys=True)
-    for surface in (packed.body, metadata_json, json.dumps(call["source"], sort_keys=True)):
-        assert DB_BODY_SENTINEL not in surface
-        assert str(db) not in surface
-        assert HERMES_SESSION_ID not in surface
-    assert packed.metadata.get("content_kind") == "locator_pointer"
+    assert report["status"] == "quarantined"
+    assert spool.depth_counts()["quarantine"] == 1
 
 
 def test_non_hermes_drain_still_packs_redacted_body(tmp_path):
@@ -357,7 +372,7 @@ def test_non_hermes_drain_still_packs_redacted_body(tmp_path):
 
 def test_cli_transcript_capture_hermes_spools_without_leaking_path(tmp_path, monkeypatch, capsys):
     db = tmp_path / "state.db"
-    _write_fake_state_db(db)
+    _write_hermes_state_db(db)
     payload = _hermes_session_payload(str(db))
     monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps(payload)))
 
@@ -383,6 +398,6 @@ def test_cli_transcript_capture_hermes_spools_without_leaking_path(tmp_path, mon
     assert output["provider"] == "hermes"
     assert output["source_locator_hash"].startswith("sha256:")
     assert str(db) not in output_text
-    assert DB_BODY_SENTINEL not in output_text
+    assert HERMES_SESSION_ID not in output_text
     pending = next((tmp_path / "capture-spool" / "pending").glob("*.json"))
     assert stat.S_IMODE(pending.stat().st_mode) == 0o600

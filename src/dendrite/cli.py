@@ -80,11 +80,6 @@ def build_parser() -> ArgumentParser:
     drain.add_argument("--max-items", type=int, default=5)
     drain.add_argument("--timeout-seconds", type=float, default=10.0)
     drain.add_argument("--requeue-recoverable-quarantine", action="store_true")
-    drain.add_argument(
-        "--enable-hermes-ship",
-        action="store_true",
-        help="ship hermes locator pointers (default off: held until the neurons pointer contract is live)",
-    )
     drain.add_argument("--runtime-dir", default="")
     drain.add_argument("--scheduler-id", default="")
     drain.add_argument("--scheduler-command-kind", default="")
@@ -333,10 +328,9 @@ def main(argv: list[str] | None = None) -> int:
             target_profile=args.target_profile,
             max_items=args.max_items,
             requeue_recoverable_quarantine=args.requeue_recoverable_quarantine,
-            hermes_ship_enabled=args.enable_hermes_ship,
         )
         print(json.dumps(report, sort_keys=True))
-        return 0 if report["status"] in {"idle", "queued", "requeued", "deferred"} else 1
+        return 0 if report["status"] in {"idle", "queued", "requeued"} else 1
 
     parser.print_help()
     return 0

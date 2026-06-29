@@ -3,107 +3,86 @@
 ## Overview
 
 `dendrite`(Mac thin-client)에 Hermes agent를 capture 대상 provider로 추가한다.
-Hermes 세션은 단일 SQLite store(`~/.hermes/state.db`)에 저장되므로, 기존 jsonl
-provider와 달리 **locator-only pointer provider**로 통합한다. dendrite는 store의
-locator(경로 handle)와 안전 metadata만 다루고 SQLite body는 절대 열거나 파싱하지
-않는다. 실제 세션 본문 추출은 neurons(server/brain)의 책임이다. neurons가 아직 pointer
-계약을 갖추지 않아, ship은 기본 비활성(**defer-gate**)이며 capture+spool까지만 동작한다
-(아래 "개정: defer-gate" 참고).
+Hermes 세션은 단일 SQLite store(`~/.hermes/state.db`)에 저장된다. dendrite는 기존
+provider처럼 **capture는 locator-only**(store 경로만 기록)로 두고, **drain(thin shipper)**
+시점에 **하나의 source adapter 인터페이스**로 소스를 읽어 다른 provider와 **동일한
+`conversation_chunk`** 문서로 ship한다. Hermes는 SQLite를 read-only로 읽는 adapter를
+쓰고, codex/claude/gemini/antigravity는 기존 jsonl 텍스트 adapter를 쓴다.
+
+이 설계는 dendrite가 *이미* 하던 일("provider 로컬 소스를 읽어 redacted 대화 문서로
+전달")을 adapter로 일반화한 것이다. session-memory build/promote, GC, RAGFlow write 등
+server/brain 책임은 여전히 neurons 소유이며 dendrite는 추가하지 않는다.
 
 ## Requirements Reference
 
 - Phase 1 source: `requirements.md`
 - 핵심 요구:
   - Hermes를 canonical `hermes`로 식별 site 전 구간에 일관 등록.
-  - locator resolver(명시 config -> `HERMES_HOME` -> 기본 `~/.hermes/state.db`) +
-    존재 기반 detector(SQLite open/query 금지).
-  - 기존 `locator_only` capture request schema 호환 envelope 생성.
-  - approved ingress(`POST /v1/ingest/enqueue`)만 사용하는 pointer-only drain ship.
-  - 기존 codex/claude/gemini/antigravity regression 금지.
+  - capture는 locator-only(store 경로 + 안전 metadata). 본문 미열람.
+  - drain은 source adapter로 소스를 읽어 redacted `conversation_chunk` ship → neurons가
+    이미 수용(neurons 수정 불필요).
+  - Hermes adapter는 SQLite를 read-only/immutable로 열고(write/checkpoint 금지) 해당
+    세션만 추출, redact 후 ship.
+  - approved ingress(`POST /v1/ingest/enqueue`)만 사용. 기존 4개 provider 무회귀.
   - server brain/session-memory build/GC/RAGFlow write 책임 미추가.
 
 ## Approach Proposal
 
-### 선택안 A (추천): Locator-only pointer provider + 좁은 hermes 분기
+### 선택안 A: pointer + neurons 계약 (기각)
 
-Hermes를 다른 provider와 동일한 식별 체계로 등록하되, drain에서 SQLite body를 읽지
-않고 locator pointer 문서만 ship하는 좁은 `provider == 'hermes'` 분기를 둔다.
+Hermes를 locator pointer로 ship하고 neurons에 pointer kind/소비자를 추가. cross-repo
+작업이 선행돼야 하고, neurons를 고치기 전엔 end-to-end가 동작하지 않음.
 
-- 장점: thin-client 경계 준수(파싱 위임), full path(identity->locator->spool->ship)
-  실제 동작, 기존 4개 provider 경로 무변경 -> regression risk 최소.
-- 단점: drain에 provider 분기 1개 추가. dendrite는 Hermes 본문을 ship하지 않음
-  (의도된 제한; 본문 추출은 neurons).
+### 선택안 B (채택): source adapter 인터페이스 1개 + provider별 adapter
 
-### 선택안 B: `SOURCE_UNPROVEN_PROVIDERS`로만 staging
+`build_drain_document`가 provider별 `TranscriptSourceAdapter`로 소스를 읽어 redacted
+transcript 텍스트를 얻고, 모두 동일한 `conversation_chunk`로 pack/ship.
 
-Hermes를 `SOURCE_UNPROVEN_PROVIDERS`에 넣어 locator 추출을 bypass(빈 locator)하고
-source_status=`source_unproven`으로 둔다.
+- 장점: Hermes가 다른 provider와 **동일한 ship 형태(conversation_chunk)** → neurons가
+  이미 수용 → **neurons 수정 0, 즉시 end-to-end**. drain/spool/shipper는 provider-agnostic
+  유지. jsonl 경로는 adapter로 추출만 하면 동작 보존.
+- 단점: dendrite가 Hermes SQLite를 read-only로 열고 그 스키마를 안다(약간 두꺼워짐).
+  잠금/WAL은 read-only/immutable open으로 회피.
 
-- 장점: 코드 변경 최소, 가장 보수적.
-- 단점: 빈 locator라 envelope에 실제 session locator가 없고, drain이 unproven을
-  permanent quarantine 처리하여 neurons로 **실제 ship되지 않음** -> 완료 기준
-  "neurons로 보낼 수 있는 redacted envelope 생성"을 약하게만 만족. 채택 안 함.
+**결정: 선택안 B.** "DB가 Mac 로컬이라 server(neurons)가 직접 못 읽음 → Mac 쪽 추출이
+어차피 필요"라는 구조적 이유 + 단일 인터페이스로 깔끔히 떨어짐. dendrite의 thin 경계는
+"transcript 문서 생산"까지로 유지되고(이미 jsonl로 하던 일), session-memory build는 계속
+neurons 몫이다.
 
-### 선택안 C: dendrite에 SQLite transcript extractor 구현
-
-dendrite가 `state.db`를 read-only로 열어 세션을 추출/redact해 body를 ship.
-
-- 장점: 다른 provider와 ship 형태가 동일.
-- 단점: SQLite open/query는 detector 금지 사항이고, transcript build는 neurons
-  책임(thin-client 경계 위반). WAL checkpoint/락 리스크. 채택 안 함.
-
-**결정: 선택안 A — 단, ship은 defer-gate.** 경계 준수 + 최소 regression. (general한
-"parser-unverified면 pointer ship" 규칙은 YAGNI, 이번엔 명시적 hermes 분기로 한정.)
-
-### 개정(구현/리뷰 중 발견 → 재논의): defer-gate
-
-system-architecture 리뷰가 cross-repo 갭을 발견: neurons ingress validator
-(`IngestJobValidator.DOCUMENT_KINDS`)는 closed allowlist이고 `session_pointer` kind가
-없어, pointer를 ship하면 fail-closed(400)로 거부된다. neurons엔 pointer consumer도
-없다. neurons는 server/brain repo라 이번 dendrite scope 밖.
-
-따라서 ship을 **기본 비활성(defer-gate)**으로 개정한다:
-
-- Hermes는 capture + spool까지만 기본 동작. drain은 hermes를 POST하지 않고 spool의
-  `deferred` 상태로 보류한다(fail-closed quarantine 아님, network 미사용).
-- pointer 빌더(`_build_hermes_pointer_document`)와 ship 경로는 코드에 남겨두되, 단일
-  스위치 `--enable-hermes-ship`(기본 off)로만 활성화한다. neurons 계약이 갖춰지면 켠다.
-- 이로써 dendrite는 정직한 producer 슬라이스가 되고, 거부될 데이터를 네트워크로 내보내지
-  않는다. 필요한 neurons 계약은 아래 "Cross-Repo Contract"에 명시(구현은 후속작업).
+(이력: 초기엔 pointer+defer 설계였으나, system-architecture 리뷰가 neurons allowlist의
+pointer 미수용을 발견 → 사용자와 재논의 → B로 전환. Review Feedback Log 참조.)
 
 ## Architecture
 
 ```mermaid
 flowchart LR
-  H[Hermes state.db<br/>~/.hermes/state.db] -. 존재만 확인, open 안 함 .-> L
   subgraph dendrite [dendrite thin-client]
-    CLI[cli.py<br/>transcript-capture --provider hermes] --> NR[normalize_provider_capture_request]
-    NR --> L[_resolve_hermes_session_locator<br/>locator-only, stat만]
-    L --> VR[validate_capture_request<br/>locator_only 강제]
-    VR --> SP[(TranscriptCaptureSpool<br/>pending/processing/acked/quarantine)]
-    SP --> DR[transcript_drain<br/>build_drain_document]
-    DR -- "provider==hermes" --> PT[locator pointer doc<br/>body read 없음]
-    DR -- "기존 4 provider" --> BD[redacted body doc<br/>변경 없음]
-    PT --> IQ[IngressQueueClient]
-    BD --> IQ
-    IQ --> IT[IngressHttpTransport<br/>POST /v1/ingest/enqueue]
+    CLI[transcript-capture --provider hermes] --> NR[normalize_provider_capture_request<br/>locator-only + 私 session_id]
+    NR --> SP[(TranscriptCaptureSpool)]
+    SP --> DR[transcript_drain.build_drain_document]
+    DR --> AD{adapter_for provider}
+    AD -- jsonl --> JA[JsonlSourceAdapter<br/>파일 텍스트 read+redact]
+    AD -- hermes --> HA[HermesSqliteSourceAdapter<br/>state.db RO 조회+redact]
+    JA --> CC[conversation_chunk]
+    HA --> CC
+    CC --> IQ[IngressQueueClient -> POST /v1/ingest/enqueue]
   end
-  IT --> N[(neurons ingress<br/>SQLite 본문 추출은 여기 책임)]
+  H[(~/.hermes/state.db)] -. read-only/immutable .-> HA
+  IQ --> N[(neurons ingress)]
 ```
 
 ### Module Boundaries
 
 | 모듈 | Hermes 변경 | 책임 |
 | --- | --- | --- |
-| `provider_contracts.py` | `SUPPORTED_PROVIDERS += 'hermes'`; `build_default_provider_source_contracts()`에 hermes 계약 1건 추가; `_provider_config_plan` hermes 분기(설정 없음 -> `{}`, deferred) | provider 식별/계약/hook-plan |
-| `providers/contracts.py` | `no_op_hook_response`/`normalize_provider_event` 허용집합에 `hermes` 추가; `_normalize_hermes_hook_event` 추가 + dispatch | hook payload 정규화 |
-| `providers/__init__.py` + `providers/hermes.py` | `__all__ += 'hermes'`; `PROVIDER = 'hermes'` stub | provider 모듈 등록 |
-| `transcript_capture.py` | `SUPPORTED_TRANSCRIPT_PROVIDERS += 'hermes'`; `_resolve_hermes_session_locator` 추가; `_extract_source_locator`/`_capture_event_type` hermes 분기; `_looks_like_provider_storage_path`에 `.hermes` 인지 추가 | locator-only capture 생성 |
-| `transcript_drain.py` | defer-gate: 기본은 hermes를 `deferred`로 보류(POST 없음). `--enable-hermes-ship` 시 `build_drain_document`의 `provider=='hermes'` pointer-only 분기(body read 없음)로 ship | thin shipper |
-| `transcript_capture.py` (Spool) | `deferred` parked 상태 추가(`defer()`/`deferred_count()`), active `depth_counts` 형태는 불변 | spool 상태기계 |
-| `cli.py` | `hook-plan`/`transcript-capture` `--provider` choices에 `hermes` 추가 | CLI 노출 |
-| `transcript_migrate.py` | **변경 없음**(jsonl glob 부적합) | 단일 SQLite store라 backfill 제외 |
-| `ingress_transport.py` / `transcript_ingest.py` / `spool.py` | **변경 없음** | provider-agnostic 전송/영속 |
+| `transcript_source.py` (신규) | `TranscriptSourceAdapter` 인터페이스 + `JsonlSourceAdapter`/`HermesSqliteSourceAdapter` + `adapter_for()` | provider 소스 → redacted transcript 텍스트 |
+| `transcript_drain.py` | `build_drain_document`가 `adapter_for(provider)`로 소스 읽기(provider-agnostic). jsonl read 헬퍼는 adapter로 이동 | thin shipper |
+| `transcript_capture.py` | hermes locator resolver(state.db, 존재/심볼릭링크 검증, 미열람) + 私 raw `session_id`를 spool request에 보관 | locator-only capture |
+| `provider_contracts.py` | hermes `ProviderSourceContract`(unverified, hook deferred) | 식별/계약/hook-plan |
+| `providers/contracts.py` + `providers/__init__.py` + `providers/hermes.py` | hermes 정규화/allowlist/stub | hook payload 정규화 |
+| `cli.py` | hook-plan/transcript-capture `--provider`에 hermes | CLI 노출 |
+| `transcript_ingest.py`/`ingress_transport.py`/`spool.py` | 변경 없음 | provider-agnostic 전송/영속 |
+| `transcript_migrate.py` | 변경 없음(jsonl glob 부적합, hermes 제외) | backfill |
 
 ## Data Flow
 
@@ -111,193 +90,133 @@ flowchart LR
 
 ```mermaid
 sequenceDiagram
-  participant Op as Operator
   participant CLI as transcript-capture
   participant N as normalize_provider_capture_request
   participant R as _resolve_hermes_session_locator
-  participant V as validate_capture_request
   participant S as TranscriptCaptureSpool
-  Op->>CLI: --provider hermes --stdin-json (payload)
-  CLI->>N: provider=hermes, payload
-  N->>R: locator 해석(명시키 -> HERMES_HOME -> 기본)
-  R-->>N: DB 경로(존재 확인, open 안 함) 또는 no-source
-  N->>N: locator_hash + version_hash(stat:mtime,size)
-  N->>V: capture request(content_policy=locator_only, body 없음)
-  V-->>N: schema ok(원경로/secret 미노출)
-  N->>S: enqueue (파일 0o600)
-  S-->>Op: JSON report (hash만, raw 없음)
+  CLI->>N: provider=hermes, payload(session_id, transcript_path?)
+  N->>R: locator 해석(명시키 -> HERMES_HOME -> 기본), 존재/심볼릭링크 검증, 미열람
+  R-->>N: state.db 경로(or no-source)
+  N->>S: spool request(content_policy=locator_only, runtime_handle=state.db, 私 session_id, 해시들)
+  S-->>CLI: JSON report(hash만; 원경로/세션id 미출력)
 ```
 
-### Hermes drain (defer-gate; ship only when enabled)
+### Hermes drain (SQLite adapter → conversation_chunk)
 
 ```mermaid
 sequenceDiagram
   participant D as transcript_drain
-  participant S as TranscriptCaptureSpool
-  participant B as build_drain_document
+  participant A as HermesSqliteSourceAdapter
   participant Q as IngressQueueClient
-  D->>S: claim된 hermes request
-  alt ship 비활성 (기본)
-    D->>S: defer() -> deferred 상태 보류
-    Note over D,S: POST 없음, quarantine 없음, network 미사용
-  else --enable-hermes-ship
-    D->>B: provider==hermes -> pointer doc(locator hash/version/metadata)
-    Note over B: SQLite body read 없음
-    B->>Q: enqueue_document(pointer doc) -> POST /v1/ingest/enqueue
-  end
+  D->>A: read_redacted_transcript(request)
+  A->>A: state.db RO/immutable open -> messages WHERE session_id -> "role: content" 조립
+  Note over A: write 없음, WAL checkpoint 없음
+  A-->>D: redacted transcript 텍스트(redact_public_ingress_text)
+  D->>Q: conversation_chunk enqueue -> POST /v1/ingest/enqueue
 ```
 
 ## Component Details
 
-### `_resolve_hermes_session_locator(payload) -> str | ""`
-- 입력: hook/CLI payload dict.
-- 우선순위: payload의 명시 locator 키(`source_locator`/`transcript_path`/
-  `transcriptPath`/`hermes_db_path` 등 기존 키 + hermes 전용 키) -> `HERMES_HOME`
-  env -> 기본 `~/.hermes/state.db`.
-- 동작: 경로 문자열 해석 + 파일 **존재 확인만**. SQLite open/connect/query 금지.
-  존재하지 않으면 `""` 반환(상위에서 no-source/skip 처리, 날조 금지).
-- 출력: 단일 경로 문자열. 기존 `_validate_locator_value`(단일 라인, 공백 토큰 금지,
-  secret-shape 금지, <=4096) 통과 대상.
-- version hash: 기존 `_source_locator_version_hash`(stat의 `mtime_ns:size` sha256)
-  재사용 — body 미열람.
+### `TranscriptSourceAdapter` (인터페이스 1개)
+- `read_redacted_transcript(request) -> str`: request의 로컬 소스를 읽어 **redacted
+  transcript 텍스트** 반환. 실패 시 `ValueError('source_unproven'|'source_policy_blocked'
+  |'source_unreadable')`로 drain이 분류/quarantine.
+- `adapter_for(provider)`: hermes→`HermesSqliteSourceAdapter`, 그 외→`JsonlSourceAdapter`.
 
-### Hermes `ProviderSourceContract`
-- `provider='hermes'`, `hook_event`=Hermes session-end 의미의 명시 문자열.
-- `source_locator_field`=resolver가 채우는 locator 필드명.
-- `native_parser_status`/`verification_status`: **unverified**로 정직하게 표기
-  (live smoke 미수행). antigravity 계약을 템플릿으로 하되 live-smoke 주장 금지.
-- `source_status`: 실제 존재 확인된 locator 기준 ship-eligible 값(빈 locator인
-  `source_unproven` 사용 안 함). 본문 미파싱은 `native_parser_status`와 drain pointer
-  분기로 표현.
-- `hook_install_status='deferred_not_installed'`, `evidence_hash='pending_probe'`
-  (antigravity와 동일 sentinel), `unsupported_reason`에 "Hermes hook API 미확정 +
-  SQLite store 본문 추출은 neurons 위임" 명시.
-- `_provider_config_plan(hermes)`는 `{}` 반환(설치 config 없음, deferred).
-- doctor/hook-plan 불변식 유지: network_used/mutation flag 모두 False, plan_only.
+### `JsonlSourceAdapter` (codex/claude/gemini/antigravity)
+- `runtime_handle`(.jsonl) 경로를 `_source_path`로 검증 후 텍스트로 read → redact+truncate.
+  기존 `build_drain_document` 동작을 그대로 옮긴 것(무회귀).
 
-### Drain defer-gate + `build_drain_document` hermes pointer 분기
-- `drain_transcript_spool_once(hermes_ship_enabled=False)`(기본): claim 후 provider가
-  `hermes`이고 ship 비활성이면 `capture_spool.defer()`로 `deferred` 보류, `ship_deferred`
-  카운트. POST/quarantine 없음, `network_used=False`. report status `deferred`.
-- `--enable-hermes-ship` 시: 정상 경로로 `build_drain_document`가 `provider=='hermes'`
-  분기 -> `source_locator.runtime_handle`을 **읽지 않고** locator pointer 문서 구성
-  (provider, locator_hash, locator_version_hash, observed_at, redacted metadata,
-  `content_kind='locator_pointer'`, kind=`session_pointer`) -> 기존 `IngressQueueClient.
-  enqueue_document` -> approved path로 POST.
-- Spool: `deferred` parked 상태 추가. `defer()`/`deferred_count()`. active `depth_counts`
-  형태는 deferred를 제외해 불변(기존 assertion 무회귀).
+### `HermesSqliteSourceAdapter` (hermes)
+- `runtime_handle`(state.db)를 `_source_path`로 검증.
+- `sqlite3.connect("file:<path>?mode=ro&immutable=1", uri=True)`로 **read-only/immutable**
+  open: 잠금 없음, WAL checkpoint 없음, write 없음.
+- `PRAGMA table_info(messages)`로 컬럼 탐지(스키마 tolerant). `content` 필수.
+  `session_id` 컬럼 + request의 私 `session_id`가 있으면 그 세션만 `WHERE session_id=?`로
+  조회, `timestamp`(없으면 rowid) 순. `role: content` 라인으로 조립 → redact+truncate.
+- 스키마는 Hermes session-storage 문서 기준 가정. live Hermes 설치 대상 검증은 미수행
+  (contract `native_parser_status=native_parser_unverified_hermes_sqlite`).
 
-### `_normalize_hermes_hook_event` + `_capture_event_type` hermes 분기
-- payload의 Hermes hook event 이름을 canonical event(`session_end` 등)로 매핑.
-- 불명 시 기존 fallback(`payload.get('event_type','session_end')`) 활용.
-- `SAFE_PAYLOAD_FIELDS` allowlist 준수, `RAW_TRANSCRIPT_FIELDS` 포함 시 기존대로 거부.
+### Capture: 私 raw session_id
+- `normalize_provider_capture_request`가 spool request에 `session_id`(raw) 보관. spool은
+  0o600 private이며 public_summary/CLI 출력/shipped 문서에는 미포함(거긴 session_id_hash만).
+  SQLite adapter가 세션 선택에 사용.
 
-### `_looks_like_provider_storage_path` `.hermes` 인지
-- `('.hermes',)` 또는 `('.hermes','state.db')` 패턴을 provider storage로 인지해
-  workspace/project 추론에서 제외(다른 provider storage 패턴과 동일 취급).
+### `_resolve_hermes_session_locator`
+- payload 명시 키(`hermes_db_path`/`state_db_path`/`session_db_path`/`transcript_path`/
+  `source_locator`/`transcriptPath`/`runtime_handle`) → `HERMES_HOME` → 기본
+  `~/.hermes/state.db` 순. **존재 + non-symlink 검증만**, SQLite open 안 함. 없으면 빈 locator.
+
+### Hermes contract / hook
+- hook이 존재함이 확인됨(Hermes shell hook: `~/.hermes/config.yaml`, session-end 이벤트,
+  stdin JSON에 `session_id`/`cwd`; 단 transcript/DB 경로는 미제공 → dendrite가 store 해석).
+- contract: `hook_install_status=deferred_not_installed`(dendrite 자동설치 안 함),
+  `source_status=source_locator_unverified`(live-smoke 미수행) → hook-plan은 non-mutating
+  `blocked_source_unproven`. evidence_hash=`pending_probe`.
 
 ## Error Handling
 
 | 시나리오 | 처리 |
 | --- | --- |
-| `state.db` 없음 | resolver `""` 반환 -> capture skip/no-source. 날조 금지, 비정상 종료 아님. |
-| locator에 공백/secret-shape | 기존 `_validate_locator_value`가 거부(기본 경로엔 공백 없음). |
-| payload에 raw transcript 필드 | 기존 `RAW_TRANSCRIPT_FIELDS` 검사로 `ValueError` (hermes 우회 금지). |
-| SQLite 잠금/WAL | 파일을 열지 않으므로 해당 없음(설계상 회피). |
-| drain 네트워크 실패 | 기존 `RECOVERABLE_ERROR_CLASSES` retry/quarantine 분류 그대로(비-hermes). |
-| hermes ship 비활성(기본) | drain이 `deferred`로 보류, POST/quarantine 없음, `network_used=False`. |
-| neurons가 pointer kind 거부 | ship 비활성이라 애초에 POST 안 함. 활성 시엔 기존 ingress reject 분류로 처리. |
-| 미지원 provider 문자열 | 기존 fail-closed `ValueError` 유지. |
-| 알 수 없는 hermes hook event | `_capture_event_type` fallback으로 안전 기본 event. |
+| `state.db` 없음(capture) | locator "" → no-source. 날조 금지. |
+| 심볼릭링크 store | `_source_path` `source_policy_blocked` → quarantine. |
+| 유효하지 않은 SQLite/스키마 불일치 | adapter `source_unreadable` → quarantine(크래시 아님). |
+| payload raw transcript 필드 | 기존 `RAW_TRANSCRIPT_FIELDS` 검사로 `ValueError`. |
+| SQLite 잠금/WAL | RO/immutable open으로 회피(write/checkpoint 없음). |
+| drain 네트워크 실패 | 기존 `RECOVERABLE_ERROR_CLASSES` retry/quarantine. |
+| 미지원 provider | 기존 fail-closed `ValueError`. |
 
 ## Testing Strategy
 
-- 프레임워크: `uv run pytest -q` (worktree 루트). 신규 `tests/test_hermes_capture_payload.py`는
-  `tests/test_antigravity_capture_payload.py`를 템플릿으로 한다.
-- 필수 케이스:
-  1. 식별: hermes가 `SUPPORTED_PROVIDERS`/`SUPPORTED_TRANSCRIPT_PROVIDERS`/
-     `no_op_hook_response`/`normalize_provider_event`/contract 목록/CLI choices에
-     모두 등록. `test_provider_contracts.py`의 set-equality 단언을 hermes 포함으로 갱신.
-  2. locator-only capture: hermes payload -> capture request가 `content_policy==
-     'locator_only'`, body 없음, `public_summary`/직렬화에 원 DB 경로 미포함, spool
-     파일 0o600.
-  3. detector 안전성: resolver/detector가 SQLite를 open/connect하지 않음(파일 미열람
-     검증 — 예: read 호출/connect monkeypatch가 호출되지 않음).
-  4. raw 거부: `RAW_TRANSCRIPT_FIELDS` 포함 payload는 `ValueError`.
-  5a. drain defer(기본): hermes request가 POST 없이 `deferred`로 보류, status
-     `deferred`, `ship_deferred_count==1`, quarantine 0, `network_used=False`.
-  5b. drain ship(`--enable-hermes-ship`): hermes가 body read 없이 pointer 문서로
-     approved endpoint에 enqueue. body+metadata에 원경로/본문/raw session id 미포함,
-     `content_kind=locator_pointer`.
-  6. regression: codex/claude/gemini/antigravity가 그대로 식별되고 drain에서 body를
-     redact해 ship(기존 동작 불변). active `depth_counts` 형태 불변.
-  7. client boundary: 신규 파일이 `FORBIDDEN_IMPORT_ROOTS`/`FORBIDDEN_SOURCE_FRAGMENTS`
-     (docker, RAGFLOW_API_KEY, brain_query, Ledger 등) 미위반.
-  8. approved endpoint: shipper가 고정 path만 사용, URL credential 거부 동작 유지.
-- evidence: 위 test green + L2 로컬 smoke(`transcript-capture --provider hermes`가
-  hash만 담은 JSON report 생성, 원경로/raw 미출력).
+- `uv run pytest -q`. 신규/갱신 `tests/test_hermes_capture_payload.py`.
+- 케이스:
+  1. 식별: hermes가 모든 allowlist/contract/CLI choices에 등록. `test_provider_contracts`
+     set-equality에 hermes 포함, hermes는 unverified.
+  2. capture locator-only: store 경로 기록, 본문 미열람, public_summary에 원경로/세션id 미포함.
+     私 raw session_id 보관 + public 미노출.
+  3. locator resolve: 명시 경로/HERMES_HOME/기본, 부재·심볼릭링크 시 빈 locator.
+  4. raw 거부: `RAW_TRANSCRIPT_FIELDS` 포함 시 `ValueError`.
+  5. drain adapter ship: 합성 SQLite store에서 해당 세션만 conversation_chunk로 ship,
+     다른 세션 content 미포함, 본문/메타/source에 원경로·세션id 미포함.
+  6. redaction: message content의 비밀(예: /Users 경로)이 shipped body에서 redact.
+  7. read-only: drain 후 store mtime/size 불변, WAL/journal sidecar 미생성.
+  8. unreadable store → quarantine(크래시 아님).
+  9. regression: codex 등 jsonl이 그대로 conversation_chunk로 ship.
+  10. client boundary/repo instruction 가드 통과(sqlite3는 금지 목록 아님).
+- evidence: 위 green + 로컬 end-to-end smoke(합성 store→capture→drain→recording ingress:
+  conversation_chunk, 세션 content shipped, 타 세션 제외, secret redact, db 불변).
 
 ## TDD Strategy
 
-code-changing work이므로 red -> green -> refactor를 기본으로 한다.
-
-- 각 milestone은 동작 test를 먼저 추가하고 fail(red)을 확인한 뒤 production code로
-  green을 만든다. 식별/capture/drain/regression 순으로 red 테스트를 선행한다.
-- docs/sample-config milestone(M4의 문서 부분)은 no-test-seam 예외로, 대체 evidence는
-  렌더된 문서 내용과 boundary test 통과로 갈음한다.
+code-changing work이므로 red→green→refactor. adapter 도입은 jsonl 동작 보존(특성화 테스트
+= 기존 drain 테스트)을 깨지 않으며, hermes adapter는 합성 SQLite 픽스처로 red→green.
+문서/AGENTS 경계 갱신은 no-test-seam 예외(대체 evidence: boundary 테스트 통과 + 렌더 내용).
 
 ## Milestones
 
-agentic-execution이 act->observe->adjust로 소비할 evidence 단위. 순서는 권장이며 각
-단위는 done 정의와 기대 evidence를 가진다.
-
-- M0: Red 테스트 선작성 — 식별/locator-only capture/detector 안전/drain pointer/
-  regression에 대한 실패 테스트 작성. done: 새 테스트가 의도대로 red.
-- M1: Provider identity green — 6개 식별 site + `providers/hermes.py` stub + contract
-  추가. done: 식별 테스트 green, `test_provider_contracts` set-equality 갱신 반영.
-- M2: Locator + detector + capture green — `_resolve_hermes_session_locator`,
-  capture 분기, `.hermes` storage 인지. done: locator-only capture/detector 안전/raw
-  거부 테스트 green, SQLite 미열람 증명.
-- M3: Drain defer-gate + regression green — drain이 hermes를 `deferred`로 보류(기본),
-  `--enable-hermes-ship` 시 pointer ship. done: defer 테스트 + enabled ship 테스트 green
-  + 4개 provider regression green + active depth_counts 형태 불변.
-- M4: CLI + hook-plan deferred + docs/sample — CLI choices, deferred hook-plan,
-  enable 방법/안전 경계/샘플 설정 문서화. done: CLI로 hermes 도달 가능, hook-plan이
-  non-mutating deferred plan 출력, 문서/샘플 존재 + boundary test 통과.
-- M5: Full local verification — `uv run pytest -q` 전체 green + L2 로컬 smoke evidence
-  (raw/원경로/credential 미출력 확인). done: 전체 통과 + smoke JSON report 증거.
-
-## Cross-Repo Contract (neurons enable precondition)
-
-dendrite의 hermes ship(`--enable-hermes-ship`)을 켜기 전에 neurons(server/brain repo)가
-갖춰야 할 계약. **구현은 이번 dendrite scope 밖, cross-repo 후속작업으로 추적.**
-
-- neurons ingress allowlist(`IngestJobValidator.DOCUMENT_KINDS`)에 pointer kind 추가
-  (`session_pointer` 또는 합의된 명칭). 현재는 closed allowlist라 거부됨.
-- pointer-aware consumer: `content_kind=locator_pointer` 문서를 transcript chunk로
-  오인 저장하지 않고, 적절히 라우팅(또는 SQLite 본문 추출 owner 지정). 현재
-  `CouchDBDeliveryBackend`는 모든 payload를 conversation_chunk로 취급.
-- 계약 형태 결정: `agent_knowledge_document.v2` 재사용 vs distinct `*_pointer.v1` 스키마.
-  distinct 쪽이 cross-repo 계약을 명시적으로 만든다(권장 검토).
-- 위 계약이 서면/구현되면 dendrite는 `--enable-hermes-ship`로 ship을 켜고 end-to-end
-  smoke(승인된 canary)로 검증.
+- M1: `transcript_source.py` 인터페이스 + JsonlSourceAdapter(기존 read 헬퍼 이동) + drain이
+  adapter 사용. done: jsonl regression green.
+- M2: HermesSqliteSourceAdapter(RO/immutable, 세션 선택, redact) + capture 私 session_id.
+  done: hermes drain → conversation_chunk green, read-only/redaction/unreadable 테스트 green.
+- M3: 식별/CLI/contract(hook 사실 반영) + AGENTS 경계 갱신 + docs. done: 전체 식별/CLI green,
+  boundary/repo-instruction green, 문서 갱신.
+- M4: Full local verification — `uv run pytest -q` 전체 green + end-to-end smoke evidence.
 
 ## Open Questions
 
-- Hermes hook/extension API 1차 자료(없으면 hook install deferred 유지, capture는
-  explicit invocation으로 동작).
-- pointer 계약 스키마/kind 명칭의 cross-repo 합의(위 Cross-Repo Contract).
-- 세션 단위 granularity(현재 DB-file pointer; per-session 추출은 neurons 위임).
+- Hermes SQLite 스키마(테이블/컬럼명)의 live 설치 대상 검증. 현재 문서 기준 가정 +
+  스키마 tolerant 구현 + 합성 픽스처 테스트. live-smoke 후 contract를 verified로 승격 가능.
+- Hermes shell hook 자동설치(`~/.hermes/config.yaml`) 플랜 생성은 추후(현재 deferred,
+  hook-plan은 blocked_source_unproven).
 
 ## Review Feedback Log
 
-- (초안) grill-to-spec 자문자답 + 7개 sonnet 리서치 + Hermes 공식 문서 기반 작성.
-- (구현 후 리뷰) code-simplifier(opus): locator resolver 중복 가드를 helper로 추출(동작
-  보존). codebase-architecture(opus): SOUND, registry 통합은 6번째 provider 시점까지
-  YAGNI, drain 분기는 올바른 seam — 반영(현행 유지).
-- (system-architecture 리뷰, opus): **cross-repo 갭 발견** — neurons ingress allowlist가
-  `session_pointer`를 거부하고 pointer consumer 부재. 직접 검증함(allowlist 8종에 없음).
-- (재논의 결정) 사용자와 재논의 → **defer-gate** 채택: ship 기본 비활성, drain은 hermes를
-  `deferred`로 보류(POST/quarantine 없음), `--enable-hermes-ship`로만 활성. neurons 계약은
-  Cross-Repo Contract로 문서화 + 후속작업 분리. SoT(requirements/design) 갱신은 본 회귀에서 수행.
-  사용자 사전 승인에 따라 design 완성 즉시 agentic-execution으로 핸드오프.
+- (초안) grill-to-spec 자문자답 + 7개 sonnet 리서치 + Hermes 공식 문서.
+- (구현 후) code-simplifier(opus) locator 가드 helper 추출; codebase-architecture(opus) SOUND.
+- (system-architecture 리뷰, opus) neurons allowlist가 pointer kind 미수용 발견(직접 검증).
+- (재논의 1) defer-gate로 ship 보류 채택 → SoT 갱신.
+- (재논의 2) 사용자가 Hermes hooks 문서 제시 → "hook 미확인" 정정. 이어 "그냥 조회하면 되지
+  않나"로 thin 경계 재검토. 서버가 Mac 로컬 DB를 못 읽는 구조적 이유 + 단일 인터페이스+adapter
+  깔끔성 → **선택안 B(adapter) 채택**. pointer/defer 제거, Hermes는 conversation_chunk ship,
+  neurons 수정 불필요. AGENTS 경계는 "shipper가 adapter로 소스 읽어 redacted transcript 전달"로
+  정직하게 한 줄 확장(session-memory build/GC/RAGFlow 금지는 유지).

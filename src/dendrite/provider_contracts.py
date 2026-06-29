@@ -168,7 +168,7 @@ def build_default_provider_source_contracts() -> list[ProviderSourceContract]:
             provider="hermes",
             provider_version="pending_probe",
             installed_version_evidence="pending_probe",
-            hook_event="Stop",
+            hook_event="on_session_end",
             source_locator_field="session_db_path",
             parser_version="provider-transcript-parser.v1",
             native_parser_status="native_parser_unverified_hermes_sqlite",
@@ -181,9 +181,10 @@ def build_default_provider_source_contracts() -> list[ProviderSourceContract]:
             redacted_evidence_ref="",
             raw_prompt_policy="locator_only_not_transcript_content",
             unsupported_reason=(
-                "hermes hook API unconfirmed; sessions live in a single SQLite store "
-                "(~/.hermes/state.db) and body extraction is deferred to neurons. dendrite "
-                "ships a locator pointer only."
+                "hermes uses a shell hook (~/.hermes/config.yaml, session-end event) and a "
+                "single SQLite session store (~/.hermes/state.db); dendrite reads that store "
+                "read-only via a source adapter and ships a conversation_chunk. parser/source "
+                "not yet live-verified against a real hermes install."
             ),
         ),
     ]
