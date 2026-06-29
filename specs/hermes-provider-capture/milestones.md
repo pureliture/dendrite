@@ -31,3 +31,14 @@
 - evidence: `uv run pytest -q` 119 passed. boundary tests green. --show-boundary intact. CLI capture smoke
   no raw path/body leak. Adversarial opus review: all 6 boundary/regression items PASS; 3 findings (D1 design-invariant,
   D2/D3 test strength) fixed and re-verified (+2 lock tests, now 16 hermes tests / 119 total).
+
+## M6 Defer-gate redesign (SoT regression after system-architecture review)
+- status: done
+- note: system-architecture review found cross-repo gap — neurons ingress allowlist rejects session_pointer
+  and has no pointer consumer (verified directly). User chose "design 재논의" → regressed to grill-to-spec,
+  updated requirements/design SoT.
+- evidence: ship now defer-gated. drain holds hermes as `deferred` by default (no POST, no quarantine,
+  network_used=false); `--enable-hermes-ship` flips to pointer ship. Spool gained `deferred` parked state
+  (active depth_counts shape unchanged). Tests: defer + enabled-ship + regression green; full suite 120 passed.
+  Drain defer smoke confirmed (status deferred, parked in deferred/, no network). Cross-Repo Contract (neurons
+  allowlist + pointer consumer) documented in design.md as enable precondition + tracked follow-up.

@@ -37,6 +37,7 @@ def drain_transcript_spool_once(
     target_profile: str,
     max_items: int = 5,
     requeue_recoverable_quarantine: bool = False,
+    hermes_ship_enabled: bool = False,
 ) -> dict:
     requeued = 0
     if requeue_recoverable_quarantine:
@@ -45,6 +46,7 @@ def drain_transcript_spool_once(
     queued = 0
     quarantined = 0
     retry_pending = 0
+    ship_deferred = 0
     network_used = False
     last_status = "idle"
     last_error_class = ""
@@ -56,7 +58,15 @@ def drain_transcript_spool_once(
             break
         attempted += 1
         try:
-            request = validate_capture_request(json.loads(claimed.read_text(encoding="utf-8")))
+            raw = json.loads(claimed.read_text(encoding="utf-8"))
+            # Hermes ships to neurons only once the neurons pointer contract is live.
+            # Until then hold (defer) it: no POST, no quarantine. (No SQLite body read.)
+            if str(raw.get("provider")) == "hermes" and not hermes_ship_enabled:
+                capture_spool.defer(claimed)
+                ship_deferred += 1
+                last_status = "ship_deferred"
+                continue
+            request = validate_capture_request(raw)
             packed = build_drain_document(request)
             content_hash = _sha256(packed.body)
             network_used = True
@@ -92,6 +102,8 @@ def drain_transcript_spool_once(
         status = "retry_pending"
     elif quarantined:
         status = "quarantined"
+    elif ship_deferred:
+        status = "deferred"
     elif requeued:
         status = "requeued"
     return {
@@ -102,6 +114,7 @@ def drain_transcript_spool_once(
         "queued_count": queued,
         "quarantined_count": quarantined,
         "retry_pending_count": retry_pending,
+        "ship_deferred_count": ship_deferred,
         "requeued_recoverable_count": requeued,
         "last_error_class": last_error_class,
         "mutation_performed": bool(attempted or requeued),

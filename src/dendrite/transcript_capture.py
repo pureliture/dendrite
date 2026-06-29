@@ -267,15 +267,19 @@ def _resolve_hermes_session_locator(payload: dict) -> str:
     for key in (*HERMES_LOCATOR_KEYS, "transcript_path", "transcriptPath", "source_locator", "runtime_handle"):
         value = payload.get(key)
         if isinstance(value, str) and value:
-            candidate = Path(value)
-            if candidate.is_file() and not candidate.is_symlink():
-                return str(candidate)
-            return ""
+            # First explicit key wins; an absent/symlinked file yields "" (never fall
+            # through to the default store, never fabricate a path).
+            return _existing_non_symlink_store(Path(value))
     hermes_home = os.environ.get("HERMES_HOME")
     if hermes_home:
-        candidate = Path(hermes_home) / "state.db"
+        default_store = Path(hermes_home) / "state.db"
     else:
-        candidate = Path.home() / HERMES_DEFAULT_STATE_DB
+        default_store = Path.home() / HERMES_DEFAULT_STATE_DB
+    return _existing_non_symlink_store(default_store)
+
+
+def _existing_non_symlink_store(candidate: Path) -> str:
+    """Return the store path only if it is a real file (not a symlink); else ""."""
     if candidate.is_file() and not candidate.is_symlink():
         return str(candidate)
     return ""
@@ -394,7 +398,13 @@ def _assert_public_surfaces_are_redacted(request: dict) -> None:
 
 
 class TranscriptCaptureSpool:
-    SUBDIRS = ("pending", "processing", "acked", "quarantine")
+    # "deferred" is a parking lot for captures intentionally held out of the active
+    # pending->processing->acked/quarantine pipeline (e.g. a provider whose neurons
+    # ingress contract is not live yet). It is excluded from depth_counts() so the
+    # active-pipeline shape stays stable; use deferred_count() for the held backlog.
+    ACTIVE_SUBDIRS = ("pending", "processing", "acked", "quarantine")
+    DEFERRED_SUBDIR = "deferred"
+    SUBDIRS = ACTIVE_SUBDIRS + (DEFERRED_SUBDIR,)
 
     def __init__(self, root: Path | str):
         self._spool = JsonFileSpool(root, subdirs=self.SUBDIRS, root_label="capture spool")
@@ -416,6 +426,10 @@ class TranscriptCaptureSpool:
 
     def quarantine(self, processing_path: Path | str) -> Path:
         return self.quarantine_with_failure(processing_path)
+
+    def defer(self, processing_path: Path | str) -> Path:
+        """Park a claimed capture in the deferred state (held, not failed, not shipped)."""
+        return self._spool.move_to(Path(processing_path), self.DEFERRED_SUBDIR)
 
     def quarantine_with_failure(self, processing_path: Path | str, failure: dict | None = None) -> Path:
         source = Path(processing_path)
@@ -472,7 +486,14 @@ class TranscriptCaptureSpool:
         return moved
 
     def depth_counts(self) -> dict[str, int]:
-        return self._spool.depth_counts()
+        # Report only the active pipeline; the deferred parking lot is reported via
+        # deferred_count() so the active-pipeline shape stays stable for callers.
+        counts = self._spool.depth_counts()
+        counts.pop(self.DEFERRED_SUBDIR, None)
+        return counts
+
+    def deferred_count(self) -> int:
+        return self._spool.depth_counts().get(self.DEFERRED_SUBDIR, 0)
 
 
 def _is_recoverable_quarantine_request(request: dict, *, max_attempts: int) -> bool:

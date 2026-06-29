@@ -259,7 +259,10 @@ def test_hermes_capture_and_drain_never_read_the_store(tmp_path, monkeypatch):
 # --- drain: locator pointer ship ------------------------------------------
 
 
-def test_hermes_drain_ships_locator_pointer_without_db_body(tmp_path):
+def test_hermes_drain_defers_without_shipping_by_default(tmp_path):
+    # neurons has no pointer contract yet (its ingress allowlist rejects the pointer
+    # kind), so dendrite must HOLD hermes captures instead of shipping them. Default
+    # drain defers: no POST, no quarantine, the item parks in the deferred state.
     db = tmp_path / "state.db"
     _write_fake_state_db(db)
     request = normalize_provider_capture_request(
@@ -276,6 +279,36 @@ def test_hermes_drain_ships_locator_pointer_without_db_body(tmp_path):
         max_items=5,
     )
 
+    assert ingress.calls == []
+    assert report["status"] == "deferred"
+    assert report["ship_deferred_count"] == 1
+    assert report["quarantined_count"] == 0
+    assert report["network_used"] is False
+    assert spool.deferred_count() == 1
+    # active pipeline depth shape is unchanged (deferred is parked outside it)
+    assert spool.depth_counts() == {"pending": 0, "processing": 0, "acked": 0, "quarantine": 0}
+
+
+def test_hermes_drain_ships_locator_pointer_when_enabled(tmp_path):
+    # When the neurons pointer contract is live, ship is enabled and hermes ships a
+    # locator pointer — still without ever reading the SQLite body.
+    db = tmp_path / "state.db"
+    _write_fake_state_db(db)
+    request = normalize_provider_capture_request(
+        "hermes", _hermes_session_payload(str(db)), project=PROJECT
+    )
+    spool = TranscriptCaptureSpool(tmp_path / "capture-spool")
+    spool.enqueue(request)
+    ingress = _RecordingIngress()
+
+    report = drain_transcript_spool_once(
+        capture_spool=spool,
+        ingress=ingress,
+        target_profile="ragflow-transcript-memory",
+        max_items=5,
+        hermes_ship_enabled=True,
+    )
+
     assert report["status"] == "queued"
     assert len(ingress.calls) == 1
     call = ingress.calls[0]
@@ -288,7 +321,6 @@ def test_hermes_drain_ships_locator_pointer_without_db_body(tmp_path):
         assert DB_BODY_SENTINEL not in surface
         assert str(db) not in surface
         assert HERMES_SESSION_ID not in surface
-    # The pointer must be marked a pointer, not a transcript chunk.
     assert packed.metadata.get("content_kind") == "locator_pointer"
 
 

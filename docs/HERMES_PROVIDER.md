@@ -22,9 +22,18 @@ dendrite는 Hermes를 **locator-only pointer provider**로 통합한다.
 - store의 **경로(locator)와 안전 metadata만** 기록한다. SQLite를 open / connect /
   query 하지 않는다.
 - locator 존재 확인은 파일 존재만 본다. 없으면 경로를 날조하지 않고 빈 locator로 둔다.
-- drain은 SQLite body를 읽지 않고 **locator pointer 문서**(provider, project, locator
-  hash, version hash, observed_at)를 approved ingress(`POST /v1/ingest/enqueue`)로 보낸다.
+- **ship은 기본 비활성(defer-gate).** drain은 hermes를 `deferred`로 보류하고 네트워크로
+  보내지 않는다(quarantine 아님). neurons가 pointer 계약을 갖추면 `--enable-hermes-ship`로
+  켤 수 있고, 그때 SQLite body를 읽지 않는 **locator pointer 문서**(provider, project,
+  locator hash, version hash, observed_at)를 approved ingress로 보낸다.
 - 실제 세션 본문 추출(SQLite 파싱)은 `neurons`(server/brain)의 책임이다.
+
+### ship이 기본 꺼져 있는 이유 (중요)
+
+현재 neurons ingress는 받는 문서 종류(kind) allowlist가 닫혀 있고 pointer kind가 없어,
+지금 보내면 fail-closed로 거부된다. 그래서 dendrite는 거부될 데이터를 내보내지 않도록
+ship을 꺼두고 capture+spool까지만 한다. neurons가 (a) allowlist에 pointer kind 추가,
+(b) pointer 전용 consumer를 갖추면 그때 켠다(cross-repo 후속작업).
 
 ## Enable 방법
 
@@ -49,12 +58,22 @@ store 경로를 payload에 주지 않으면 dendrite가 `HERMES_HOME` → `~/.he
 payload locator 키 우선순위: `hermes_db_path` / `state_db_path` / `session_db_path`
 또는 공통 키 `transcript_path` / `source_locator` → `HERMES_HOME` → 기본 경로.
 
-### 2) ship (thin shipper)
+### 2) drain (기본: hermes는 보류)
 
 ```bash
 uv run python -m dendrite transcript-drain --once \
   --capture-spool "$HOME/.local/state/dendrite/capture-spool" \
   --ingress-url "http://<approved-ingress-host>:18080"
+# hermes 항목은 status "deferred"로 보류됨(POST 없음). 다른 provider는 정상 ship.
+```
+
+### 2b) ship 활성화 (neurons pointer 계약이 준비된 뒤에만)
+
+```bash
+uv run python -m dendrite transcript-drain --once \
+  --capture-spool "$HOME/.local/state/dendrite/capture-spool" \
+  --ingress-url "http://<approved-ingress-host>:18080" \
+  --enable-hermes-ship
 ```
 
 ### 3) hook plan (non-mutating, deferred)
