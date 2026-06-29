@@ -7,14 +7,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable
 
-from .redaction import redact_public_ingress_text
 from .transcript_capture import TranscriptCaptureSpool, validate_capture_request
 from .transcript_ingest import IngressQueueClient
+from .transcript_source import MAX_TRANSCRIPT_BODY_CHARS, adapter_for
 
 
 DRAIN_SCHEMA_VERSION = "dendrite_transcript_drain_result.v1"
 PARSER_VERSION = "dendrite-thin-transcript-drain.v1"
-MAX_TRANSCRIPT_BODY_CHARS = 180_000
 RECOVERABLE_ERROR_CLASSES = {
     "ingress_invalid_json",
     "ingress_unreachable",
@@ -115,8 +114,7 @@ def build_drain_document(request: dict) -> PackedTranscriptDocument:
     provider = str(request["provider"])
     project = str(request["project"])
     locator = request.get("source_locator") or {}
-    source_path = _source_path(locator.get("runtime_handle"))
-    redacted_source = _read_redacted_source(source_path)
+    redacted_source = adapter_for(provider).read_redacted_transcript(request)
     observed_at = str(request.get("observed_at") or _now_iso())
     turn_count = max(_estimated_turn_count(redacted_source), 1)
     session_id_hash = str(request["session_id_hash"])
@@ -182,28 +180,6 @@ def build_drain_document(request: dict) -> PackedTranscriptDocument:
         metadata=metadata,
         filename=filename,
     )
-
-
-def _source_path(value) -> Path:
-    if not isinstance(value, str) or not value:
-        raise ValueError("source_unproven")
-    path = Path(value)
-    if path.is_symlink():
-        raise ValueError("source_policy_blocked")
-    if not path.exists() or not path.is_file():
-        raise ValueError("source_unreadable")
-    return path
-
-
-def _read_redacted_source(path: Path) -> str:
-    try:
-        text = path.read_text(encoding="utf-8", errors="replace")
-    except OSError as exc:
-        raise ValueError("source_unreadable") from exc
-    redacted = redact_public_ingress_text(text)
-    if len(redacted) > MAX_TRANSCRIPT_BODY_CHARS:
-        return redacted[: MAX_TRANSCRIPT_BODY_CHARS - len("\n[truncated]\n")] + "\n[truncated]\n"
-    return redacted
 
 
 def _estimated_turn_count(text: str) -> int:

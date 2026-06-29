@@ -6,7 +6,7 @@ import json
 import shlex
 
 
-SUPPORTED_PROVIDERS = {"claude", "gemini", "codex", "antigravity"}
+SUPPORTED_PROVIDERS = {"claude", "gemini", "codex", "antigravity", "hermes"}
 SUPPORTED_HOOK_ACTIONS = {"install", "uninstall"}
 
 
@@ -162,6 +162,30 @@ def build_default_provider_source_contracts() -> list[ProviderSourceContract]:
             rollback_state="not_installed_no_runtime_rollback_needed",
             evidence_hash="pending_probe",
             redacted_evidence_ref="",
+        ),
+        ProviderSourceContract(
+            contract_id="hermes-session-end-state-db.v1",
+            provider="hermes",
+            provider_version="pending_probe",
+            installed_version_evidence="pending_probe",
+            hook_event="on_session_end",
+            source_locator_field="session_db_path",
+            parser_version="provider-transcript-parser.v1",
+            native_parser_status="native_parser_unverified_hermes_sqlite",
+            privacy_redaction_status="privacy_redaction_unverified",
+            verification_status="source_locator_unverified",
+            source_status="source_locator_unverified",
+            hook_install_status="deferred_not_installed",
+            rollback_state="not_installed_no_runtime_rollback_needed",
+            evidence_hash="pending_probe",
+            redacted_evidence_ref="",
+            raw_prompt_policy="locator_only_not_transcript_content",
+            unsupported_reason=(
+                "hermes uses a shell hook (~/.hermes/config.yaml, session-end event) and a "
+                "single SQLite session store (~/.hermes/state.db); dendrite reads that store "
+                "read-only via a source adapter and ships a conversation_chunk. parser/source "
+                "not yet live-verified against a real hermes install."
+            ),
         ),
     ]
 
