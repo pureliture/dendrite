@@ -28,6 +28,16 @@ MAX_TRANSCRIPT_BODY_CHARS = 180_000
 HERMES_MESSAGES_TABLE = "messages"
 
 
+def _hermes_ro_uri(path: Path) -> str:
+    """SQLite URI that opens the Hermes store read-only and immutable.
+
+    ``mode=ro&immutable=1`` means no locks are taken, no WAL checkpoint is ever
+    triggered, and the store is never written. Every Hermes reader must use this
+    so the safety contract lives in one place.
+    """
+    return f"file:{path}?mode=ro&immutable=1"
+
+
 class TranscriptSourceAdapter:
     def read_redacted_transcript(self, request: dict) -> str:
         """Return the redacted transcript text for the request's local source.
@@ -101,7 +111,7 @@ def enumerate_hermes_sessions(db_path) -> list[str]:
     if not path.is_file() or path.is_symlink():
         return []
     try:
-        conn = sqlite3.connect(f"file:{path}?mode=ro&immutable=1", uri=True)
+        conn = sqlite3.connect(_hermes_ro_uri(path), uri=True)
     except sqlite3.Error:
         return []
     try:
@@ -130,7 +140,7 @@ def _read_hermes_session_text(path: Path, session_id: str) -> str:
     read (a single-session store).
     """
     try:
-        conn = sqlite3.connect(f"file:{path}?mode=ro&immutable=1", uri=True)
+        conn = sqlite3.connect(_hermes_ro_uri(path), uri=True)
     except sqlite3.Error as exc:
         raise ValueError("source_unreadable") from exc
     try:

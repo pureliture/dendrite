@@ -86,8 +86,16 @@ uv run python -m dendrite transcript-drain --once \
 ```
 
 - store 경로 override: `--source-root hermes=/path/to/state.db` (없으면 `HERMES_HOME` → 기본).
-- **멱등**: 같은 세션·같은 store 상태면 re-run해도 중복 적재되지 않는다.
+- **멱등(주의)**: re-run 멱등은 **store 상태가 그대로일 때** 성립한다. `locator_version_hash`가
+  세션별이 아니라 `state.db` 파일 전체(mtime:size) 기준이라, 마이그레이션 사이에 **아무 세션에
+  턴이 추가되면 모든 세션이 다시 spool**된다(낭비지만 손상 아님; 변하지 않은 세션은 ship 단계의
+  content_hash 멱등으로 흡수됨). 마이그레이션 중에는 **Hermes 동시 쓰기를 피하는** 것이 좋다.
+- 대용량 store는 `--limit`로 배치 처리한다(전체 spool은 세션 수만큼 파일을 한 번에 쌓는다).
 - 열거는 read-only/immutable(쓰기·checkpoint 없음), report는 카운트만(원경로/세션id/내용 미출력).
+- **라이브 전송 선행조건(cross-repo)**: 자란 세션을 재전송하면 같은 `session_id_hash`에 대해
+  더 긴 `conversation_chunk`가 기존 것과 겹친다(현재 `supersedes=""`). 실제 neurons로 라이브
+  전송하기 전에 neurons 측 overlap/supersede 해석 규칙(latest-wins/supersede 등)을 먼저 정해야
+  중복 누적을 막는다. dendrite는 client half까지만 책임진다.
 
 ### 3) hook plan (non-mutating, deferred)
 

@@ -254,6 +254,20 @@ def test_hermes_migrate_is_idempotent(tmp_path):
     assert len(list((spool / "pending").glob("*.json"))) == 2
 
 
+def test_hermes_migrate_report_is_path_and_session_id_free(tmp_path):
+    # The migration report must carry counts only — never the raw store path or
+    # session ids (guards against a future "add root for symmetry" edit).
+    db = tmp_path / "state.db"
+    _make_hermes_db(db, {"sess-aaa": [("user", "1")], "sess-bbb": [("user", "2")]})
+    report = migrate(spool_root=tmp_path / "spool", roots={"hermes": db}, providers=["hermes"])
+    hermes = report["by_provider"]["hermes"]
+    assert "root" not in hermes
+    blob = json.dumps(report)
+    assert str(db) not in blob
+    assert "sess-aaa" not in blob
+    assert "sess-bbb" not in blob
+
+
 def test_hermes_migrate_root_unavailable(tmp_path):
     report = migrate(
         spool_root=tmp_path / "s",

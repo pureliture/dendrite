@@ -117,9 +117,13 @@ def migrate(
             report.by_provider[provider] = {"status": "unsupported_provider", "found": 0, "spooled": 0, "errors": 0}
             continue
         if provider == "hermes":
-            summary = _migrate_hermes(roots.get("hermes"), spool, project, limit, dry_run, report)
+            summary = _migrate_hermes(
+                roots.get("hermes"), spool, project=project, limit=limit, dry_run=dry_run, report=report
+            )
         else:
-            summary = _migrate_jsonl(provider, roots.get(provider), spool, project, limit, dry_run, report)
+            summary = _migrate_jsonl(
+                provider, roots.get(provider), spool, project=project, limit=limit, dry_run=dry_run, report=report
+            )
         report.by_provider[provider] = summary
         report.spooled += summary["spooled"]
         report.errors += summary["errors"]
@@ -127,7 +131,16 @@ def migrate(
     return report.as_dict()
 
 
-def _migrate_jsonl(provider, root, spool, project, limit, dry_run, report) -> dict:
+def _migrate_jsonl(
+    provider: str,
+    root: Path | None,
+    spool: TranscriptCaptureSpool | None,
+    *,
+    project: str,
+    limit: int | None,
+    dry_run: bool,
+    report: MigrationReport,
+) -> dict:
     """Migrate a directory of per-session jsonl files (codex/claude/gemini/antigravity)."""
     if not root or not Path(root).is_dir():
         return {"status": "root_unavailable", "root": str(root or ""), "found": 0, "spooled": 0, "errors": 0}
@@ -149,7 +162,15 @@ def _migrate_jsonl(provider, root, spool, project, limit, dry_run, report) -> di
     return {"status": "ok", "root": str(root), "found": len(files), "spooled": spooled, "errors": errors}
 
 
-def _migrate_hermes(root, spool, project, limit, dry_run, report) -> dict:
+def _migrate_hermes(
+    root: Path | None,
+    spool: TranscriptCaptureSpool | None,
+    *,
+    project: str,
+    limit: int | None,
+    dry_run: bool,
+    report: MigrationReport,
+) -> dict:
     """Migrate a single SQLite store by enumerating its sessions (read-only).
 
     The report carries counts only — never the raw store path or session ids.
