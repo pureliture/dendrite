@@ -120,6 +120,7 @@ def build_drain_document(request: dict) -> PackedTranscriptDocument:
     session_id_hash = str(request["session_id_hash"])
     source_locator_hash = str(locator.get("locator_hash") or "")
     chunk_id = f"conversation_{_hash_fragment(session_id_hash, 16)}"
+    agent_id = str(request.get("agent_id") or f"{_slug(provider)}-transcript-capture")
     content = _bounded_body(
         [
             "# Conversation Chunk",
@@ -143,7 +144,7 @@ def build_drain_document(request: dict) -> PackedTranscriptDocument:
         "knowledge_id": f"kn_{_hash_fragment(_sha256(content), 24)}",
         "provider": provider,
         "project": project,
-        "agent_id": f"{_slug(provider)}-transcript-capture",
+        "agent_id": agent_id,
         "session_id_hash": session_id_hash,
         "source_locator_hash": source_locator_hash,
         "chunk_id": chunk_id,
@@ -167,6 +168,8 @@ def build_drain_document(request: dict) -> PackedTranscriptDocument:
         "retention_policy": "private_indefinite_until_disabled",
         "supersedes": "",
     }
+    if provider == "hermes" and request.get("hermes_profile"):
+        metadata["hermes_profile"] = str(request["hermes_profile"])
     body = _render_markdown(metadata, content.splitlines())
     content_hash = _sha256(body)
     filename = (
@@ -193,12 +196,15 @@ def _estimated_turn_count(text: str) -> int:
 
 
 def _queue_source(request: dict) -> dict[str, str]:
-    return {
+    source = {
         "host": "mac_mini",
         "producer": "dendrite-transcript-drain",
         "provider": str(request["provider"]),
         "project": str(request["project"]),
     }
+    if request.get("provider") == "hermes" and request.get("hermes_profile"):
+        source["hermes_profile"] = str(request["hermes_profile"])
+    return source
 
 
 def _bounded_body(lines: Iterable[str]) -> str:

@@ -6,14 +6,17 @@ RAGFlow write 같은 server/brain 책임은 갖지 않는다(그건 `neurons`).
 
 ## Hermes가 다른 provider와 다른 점
 
-Hermes Agent(Nous Research)는 모든 세션을 **단일 SQLite store**에 저장한다.
+Hermes Agent(Nous Research)는 profile별 SQLite store에 세션을 저장한다.
 
-- 기본 위치: `~/.hermes/state.db` (override: 환경변수 `HERMES_HOME` → `$HERMES_HOME/state.db`)
+- default profile 위치: `~/.hermes/state.db`
+- named profile 위치: `~/.hermes/profiles/<profile>/state.db`
+- override: 환경변수 `HERMES_HOME` → `$HERMES_HOME/state.db`
 - 동반 파일: `state.db-wal`, `state.db-shm`
 - 테이블: `sessions`, `messages` 등
 
 codex/claude/gemini/antigravity는 세션마다 `*.jsonl` 파일을 쓰지만 Hermes는 DB 하나에
-모든 세션을 담는다.
+profile별 세션을 담는다. `dendrite`는 같은 `provider=hermes` 아래에서도 `hermes_profile`,
+`agent_id`, `session_id_hash`를 profile별로 분리한다.
 
 ## 통합 방식: source adapter 인터페이스 1개
 
@@ -21,8 +24,8 @@ dendrite는 provider 소스를 읽어 redacted transcript 문서(`conversation_c
 보내는 일을 **하나의 source adapter 인터페이스**로 처리한다.
 
 - `JsonlSourceAdapter` (codex/claude/gemini/antigravity): `.jsonl` 파일을 텍스트로 읽어 redact.
-- `HermesSqliteSourceAdapter` (hermes): `state.db`를 **read-only/immutable**로 열어 해당
-  세션의 메시지만 조회 → redact.
+- `HermesSqliteSourceAdapter` (hermes): profile별 `state.db`를 **read-only/immutable**로 열어
+  해당 세션의 메시지만 조회 → redact.
 
 두 adapter 모두 같은 `conversation_chunk`를 만들어 보내므로, Hermes도 다른 provider와
 **동일한 형태로 neurons에 전송**되고 neurons는 그대로 수용한다(별도 수정 불필요).
@@ -50,9 +53,21 @@ echo '{"hook_event_name":"on_session_end","session_id":"<id>","transcript_path":
       --stdin-json
 ```
 
-store 경로를 payload에 주지 않으면 dendrite가 `HERMES_HOME` → `~/.hermes/state.db`
-순으로 해석한다(존재할 때만). locator 키 우선순위: `hermes_db_path`/`state_db_path`/
-`session_db_path`/`transcript_path`/`source_locator` → `HERMES_HOME` → 기본 경로.
+store 경로를 payload에 주지 않으면 dendrite가 `HERMES_HOME` → `--hermes-profile` →
+`~/.hermes/state.db` 순으로 해석한다(존재할 때만). locator 키 우선순위:
+`hermes_db_path`/`state_db_path`/`session_db_path`/`transcript_path`/`source_locator` →
+`HERMES_HOME` → `--hermes-profile` → 기본 경로.
+
+named profile hook 예시:
+
+```bash
+uv run python -m dendrite transcript-capture \
+  --provider hermes \
+  --hermes-profile metis \
+  --project your-project \
+  --spool "$HOME/.local/state/dendrite/capture-spool" \
+  --stdin-json
+```
 
 ### 2) drain (ship)
 
@@ -65,19 +80,21 @@ uv run python -m dendrite transcript-drain --once \
 
 ### 2c) 벌크 마이그레이션 (과거 세션 백필)
 
-기존에 쌓인 Hermes 세션을 일괄로 보낼 때는 `transcript-migrate`를 쓴다. jsonl provider와
-달리 Hermes는 `state.db`의 세션을 read-only로 열거해 세션별 locator-only request를 spool하고,
-이후 `transcript-drain`이 세션별 `conversation_chunk`로 ship한다.
+기존에 쌓인 Hermes 세션을 보낼 때는 `transcript-migrate`를 쓴다. jsonl provider와 달리
+Hermes는 default와 named profile의 `state.db`를 read-only로 열거해 세션별 locator-only
+request를 spool하고, 이후 `transcript-drain`이 세션별 `conversation_chunk`로 ship한다.
+이번 scope에서 전체 live backfill은 운영 gate 밖에 두고, profile별 dry-run과 bounded smoke부터
+사용한다.
 
 ```bash
 # 1) 먼저 안전하게 세션 수만 확인 (read-only, 아무것도 안 보냄)
 uv run python -m dendrite transcript-migrate --spool "$HOME/.local/state/dendrite/capture-spool" \
   --provider hermes --dry-run
-# -> by_provider.hermes.found = 세션 수
+# -> by_provider.hermes.profiles.<profile>.found = profile별 세션 수
 
-# 2) 일부만 스모크 (--limit), 또는 전체 spool
+# 2) profile별 일부만 스모크 (--limit)
 uv run python -m dendrite transcript-migrate --spool "$HOME/.local/state/dendrite/capture-spool" \
-  --provider hermes --limit 1
+  --provider hermes --hermes-profile metis --limit 1
 
 # 3) drain으로 세션별 conversation_chunk ship
 uv run python -m dendrite transcript-drain --once \
@@ -85,12 +102,17 @@ uv run python -m dendrite transcript-drain --once \
   --ingress-url "http://<approved-ingress-host>:18080"
 ```
 
-- store 경로 override: `--source-root hermes=/path/to/state.db` (없으면 `HERMES_HOME` → 기본).
+- store 경로 override: `--source-root hermes=/path/to/.hermes` 또는
+  `--source-root hermes=/path/to/state.db` (없으면 `HERMES_HOME` → 기본 `~/.hermes`).
+- `session_id_hash`는 `provider:profile:session_id` 기준으로 계산되어 서로 다른 profile의 같은
+  raw session id가 충돌하지 않는다.
+- drain metadata의 `agent_id`는 `hermes-<profile>-transcript-capture` 형태다.
 - **멱등(주의)**: re-run 멱등은 **store 상태가 그대로일 때** 성립한다. `locator_version_hash`가
   세션별이 아니라 `state.db` 파일 전체(mtime:size) 기준이라, 마이그레이션 사이에 **아무 세션에
   턴이 추가되면 모든 세션이 다시 spool**된다(낭비지만 손상 아님; 변하지 않은 세션은 ship 단계의
   content_hash 멱등으로 흡수됨). 마이그레이션 중에는 **Hermes 동시 쓰기를 피하는** 것이 좋다.
-- 대용량 store는 `--limit`로 배치 처리한다(전체 spool은 세션 수만큼 파일을 한 번에 쌓는다).
+- Hermes non-dry-run migration은 `--limit` 없는 unbounded spool을 거부한다. 대용량 store는 profile별
+  bounded batch로 나눠 처리한다.
 - 열거는 read-only/immutable(쓰기·checkpoint 없음), report는 카운트만(원경로/세션id/내용 미출력).
 - **라이브 전송 선행조건(cross-repo)**: 자란 세션을 재전송하면 같은 `session_id_hash`에 대해
   더 긴 `conversation_chunk`가 기존 것과 겹친다(현재 `supersedes=""`). 실제 neurons로 라이브
@@ -103,8 +125,10 @@ uv run python -m dendrite transcript-drain --once \
 uv run python -m dendrite provider hook-plan --provider hermes --action install
 ```
 
-Hermes는 live-smoke되지 않았으므로 `planned_status`는 `blocked_source_unproven`이며 어떤
-config도 자동 변경하지 않는다(`mutation_performed: false`).
+Hermes는 source contract가 아직 runtime-verified로 승격되지 않았으므로 `planned_status`는
+`blocked_source_unproven`이며 어떤 config도 자동 변경하지 않는다(`mutation_performed: false`).
+출력에는 profile별 readiness aggregate와 command shape가 포함되지만 raw config, raw private path,
+raw session id는 포함하지 않는다.
 
 ## 안전 경계 (반드시 지킨다)
 
@@ -125,14 +149,14 @@ provider hook을 직접 설치할 때 사용할 수 있는 argv 형태(예시; �
 hooks:
   on_session_end:
     - matcher: ""
-      command: "dendrite transcript-capture --provider hermes --project <project> --spool <private-capture-spool> --stdin-json --non-fatal"
+      command: "dendrite transcript-capture --provider hermes --hermes-profile <profile> --project <project> --spool <private-capture-spool> --stdin-json --non-fatal"
       timeout: 5
 ```
 
 환경변수:
 
 ```bash
-# Hermes store 위치 override (기본 ~/.hermes/state.db)
+# Hermes store 위치 override (기본 ~/.hermes/state.db, named profile은 ~/.hermes/profiles/<profile>/state.db)
 export HERMES_HOME="$HOME/.hermes"
 ```
 

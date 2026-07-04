@@ -67,6 +67,7 @@ def build_parser() -> ArgumentParser:
     capture.add_argument("--stdin-json", action="store_true", help="read provider hook payload JSON from stdin")
     capture.add_argument("--non-fatal", action="store_true", help="return success after reporting capture errors")
     capture.add_argument("--kickstart-label", help="best-effort launchctl kickstart label after spooling")
+    capture.add_argument("--hermes-profile", default="", help="Hermes profile name for profile-scoped capture")
     capture.add_argument(
         "--require-workspace-path",
         action="store_true",
@@ -95,6 +96,7 @@ def build_parser() -> ArgumentParser:
     migrate_cmd.add_argument(
         "--source-root", action="append", help="override a provider source root as provider=/path; repeatable"
     )
+    migrate_cmd.add_argument("--hermes-profile", action="append", help="limit Hermes migration to profile(s); repeatable")
     migrate_cmd.add_argument("--limit", type=int, help="max sessions per provider (smoke runs)")
     migrate_cmd.add_argument("--dry-run", action="store_true", help="enumerate and count without spooling")
     source_catalog = subparsers.add_parser("source-catalog", help="local SourceRef catalog utilities")
@@ -118,22 +120,23 @@ def build_parser() -> ArgumentParser:
     return parser
 
 
+def _print_json(payload: dict) -> None:
+    print(json.dumps(payload, sort_keys=True))
+
+
 def _print_capture_event_result(path) -> None:
     stored = json.loads(path.read_text(encoding="utf-8"))
-    print(
-        json.dumps(
-            {
-                "schema_version": "dendrite_capture_result.v1",
-                "status": "spooled",
-                "event_id": stored["event_id"],
-                "provider": stored["provider"],
-                "project": stored["project"],
-                "event_type": stored["event_type"],
-                "content_hash": stored["content_hash"],
-                "spool_file": str(path),
-            },
-            sort_keys=True,
-        )
+    _print_json(
+        {
+            "schema_version": "dendrite_capture_result.v1",
+            "status": "spooled",
+            "event_id": stored["event_id"],
+            "provider": stored["provider"],
+            "project": stored["project"],
+            "event_type": stored["event_type"],
+            "content_hash": stored["content_hash"],
+            "spool_file": str(path),
+        }
     )
 
 
@@ -146,13 +149,13 @@ def _capture_event_from_fixture(args) -> int:
         _print_capture_event_result(path)
         return 0
     except Exception as exc:
-        print(json.dumps({"status": "capture_error", "error_class": exc.__class__.__name__}, sort_keys=True))
+        _print_json({"status": "capture_error", "error_class": exc.__class__.__name__})
         return 1
 
 
 def _capture_event_from_stdin(args) -> int:
     if not args.stdin_json:
-        print(json.dumps({"status": "error", "error_class": "stdin_json_required"}, sort_keys=True))
+        _print_json({"status": "error", "error_class": "stdin_json_required"})
         return 0 if args.non_fatal else 2
     try:
         payload = json.load(sys.stdin)
@@ -163,61 +166,54 @@ def _capture_event_from_stdin(args) -> int:
         _print_capture_event_result(path)
         return 0
     except Exception as exc:
-        print(json.dumps({"status": "capture_error", "error_class": exc.__class__.__name__}, sort_keys=True))
+        _print_json({"status": "capture_error", "error_class": exc.__class__.__name__})
         return 0 if args.non_fatal else 1
 
 
 def _capture_from_stdin(args) -> int:
     if not args.stdin_json:
-        print(json.dumps({"status": "error", "error_class": "stdin_json_required"}, sort_keys=True))
+        _print_json({"status": "error", "error_class": "stdin_json_required"})
         return 0 if args.non_fatal else 2
     try:
         payload = json.load(sys.stdin)
         if not isinstance(payload, dict):
             raise ValueError("provider payload must be a JSON object")
         if args.require_workspace_path and not has_workspace_path(payload):
-            print(
-                json.dumps(
-                    {
-                        "schema_version": "dendrite_transcript_capture_result.v1",
-                        "status": "skipped_no_workspace_path",
-                        "provider": args.provider,
-                    },
-                    sort_keys=True,
-                )
+            _print_json(
+                {
+                    "schema_version": "dendrite_transcript_capture_result.v1",
+                    "status": "skipped_no_workspace_path",
+                    "provider": args.provider,
+                }
             )
             return 0
+        if args.provider == "hermes" and args.hermes_profile:
+            payload = {**payload, "hermes_profile": args.hermes_profile}
         request = normalize_provider_capture_request(args.provider, payload, project=args.project)
         path = TranscriptCaptureSpool(args.spool).enqueue(request)
         if args.kickstart_label:
             _best_effort_kickstart_launchagent(args.kickstart_label)
         source_locator = request.get("source_locator") or {}
-        print(
-            json.dumps(
-                {
-                    "schema_version": "dendrite_transcript_capture_result.v1",
-                    "status": "spooled",
-                    "request_id": request["request_id"],
-                    "provider": request["provider"],
-                    "project": request["project"],
-                    "event_type": request["event_type"],
-                    "source_locator_hash": source_locator.get("locator_hash", ""),
-                    "spool_file": str(path),
-                },
-                sort_keys=True,
-            )
+        _print_json(
+            {
+                "schema_version": "dendrite_transcript_capture_result.v1",
+                "status": "spooled",
+                "request_id": request["request_id"],
+                "provider": request["provider"],
+                "project": request["project"],
+                "event_type": request["event_type"],
+                "source_locator_hash": source_locator.get("locator_hash", ""),
+                "spool_file": str(path),
+            }
         )
         return 0
     except Exception as exc:
-        print(
-            json.dumps(
-                {
-                    "schema_version": "dendrite_transcript_capture_result.v1",
-                    "status": "capture_error",
-                    "error_class": exc.__class__.__name__,
-                },
-                sort_keys=True,
-            )
+        _print_json(
+            {
+                "schema_version": "dendrite_transcript_capture_result.v1",
+                "status": "capture_error",
+                "error_class": exc.__class__.__name__,
+            }
         )
         return 0 if args.non_fatal else 1
 
@@ -230,21 +226,19 @@ def _transcript_migrate(args) -> int:
             roots=roots,
             project=args.project,
             providers=args.provider,
+            hermes_profiles=args.hermes_profile,
             limit=args.limit,
             dry_run=args.dry_run,
         )
-        print(json.dumps(report, sort_keys=True))
+        _print_json(report)
         return 0
     except Exception as exc:
-        print(
-            json.dumps(
-                {
-                    "schema_version": "dendrite_transcript_migrate_result.v1",
-                    "status": "migrate_error",
-                    "error_class": exc.__class__.__name__,
-                },
-                sort_keys=True,
-            )
+        _print_json(
+            {
+                "schema_version": "dendrite_transcript_migrate_result.v1",
+                "status": "migrate_error",
+                "error_class": exc.__class__.__name__,
+            }
         )
         return 1
 
@@ -320,7 +314,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "transcript-drain":
         if not args.once:
-            print(json.dumps({"status": "error", "error_class": "once_required"}, sort_keys=True))
+            _print_json({"status": "error", "error_class": "once_required"})
             return 2
         report = drain_transcript_spool_once(
             capture_spool=TranscriptCaptureSpool(args.capture_spool),
@@ -329,7 +323,7 @@ def main(argv: list[str] | None = None) -> int:
             max_items=args.max_items,
             requeue_recoverable_quarantine=args.requeue_recoverable_quarantine,
         )
-        print(json.dumps(report, sort_keys=True))
+        _print_json(report)
         return 0 if report["status"] in {"idle", "queued", "requeued"} else 1
 
     parser.print_help()
