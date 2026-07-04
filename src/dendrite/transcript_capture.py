@@ -8,6 +8,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 from time import time
 
+from .hermes_profiles import (
+    DEFAULT_HERMES_PROFILE,
+    default_hermes_home,
+    hermes_agent_id,
+    hermes_profile_from_payload,
+    hermes_session_hash_seed,
+    state_db_for_profile,
+)
 from .redaction import redact_text_v2
 from .spool import JsonFileSpool
 
@@ -27,6 +35,7 @@ SOURCE_UNPROVEN_PROVIDERS: set[str] = set()
 CODEX_SESSION_ID_PATTERN = re.compile(r"^[A-Za-z0-9_.:-]{8,160}$")
 HERMES_DEFAULT_STATE_DB = ".hermes/state.db"
 HERMES_LOCATOR_KEYS = ("hermes_db_path", "state_db_path", "session_db_path")
+HERMES_PROFILE_KEYS = ("hermes_profile", "profile", "profile_name")
 PROJECT_SOURCE_PATH_KEYS = (
     "workspacePath",
     "workspace_path",
@@ -187,13 +196,42 @@ def normalize_provider_capture_request(provider: str, payload: dict, *, project:
     project = _resolve_project(payload, project)
     session_id = str(payload.get("session_id") or _provider_session_id(provider, payload))
     locator = _extract_source_locator(provider, payload)
+    hermes_profile = hermes_profile_from_payload(payload, locator=locator) if provider == "hermes" else ""
+    agent_id = hermes_agent_id(hermes_profile) if provider == "hermes" else f"{provider}-transcript-capture"
     locator_hash = _sha256(locator) if locator else ""
     locator_version_hash = _source_locator_version_hash(locator)
     source_status = "source_unproven" if provider in SOURCE_UNPROVEN_PROVIDERS else "source_locator_private_spool_only"
     event_type = _capture_event_type(provider, payload)
-    identity = ":".join([provider, event_type, session_id or locator_hash, locator_hash, locator_version_hash])
+    identity = ":".join(
+        [
+            provider,
+            event_type,
+            hermes_profile,
+            session_id or locator_hash,
+            locator_hash,
+            locator_version_hash,
+        ]
+    )
     observed_at = str(payload.get("observed_at") or payload.get("timestamp") or _now_iso())
     request_id = "req_" + hashlib.sha256(identity.encode("utf-8")).hexdigest()[:16]
+    session_hash_seed = (
+        hermes_session_hash_seed(session_id, hermes_profile) if provider == "hermes" else f"{provider}:{session_id}"
+    )
+    public_summary = {
+        "provider": provider,
+        "project": project,
+        "source_status": source_status,
+        "source_locator_hash": locator_hash,
+        "source_locator_version_hash": locator_version_hash,
+        "observed_at": observed_at,
+    }
+    request_extra = {}
+    if provider == "hermes":
+        request_extra = {
+            "hermes_profile": hermes_profile,
+            "agent_id": agent_id,
+        }
+        public_summary.update(request_extra)
 
     return {
         "schema_version": CAPTURE_SCHEMA_VERSION,
@@ -202,7 +240,8 @@ def normalize_provider_capture_request(provider: str, payload: dict, *, project:
         "project": project,
         "event_type": event_type,
         "observed_at": observed_at,
-        "session_id_hash": _sha256(f"{provider}:{session_id}"),
+        "session_id_hash": _sha256(session_hash_seed),
+        **request_extra,
         # Private (spool-only) raw session id: lets a structured-store adapter (hermes
         # SQLite) select the one session at drain time. Never enters public_summary or
         # the shipped document (which use session_id_hash only).
@@ -223,14 +262,7 @@ def normalize_provider_capture_request(provider: str, payload: dict, *, project:
         "redaction_version": "redaction.v2",
         "privacy_level": "private_session",
         "content_policy": "locator_only",
-        "public_summary": {
-            "provider": provider,
-            "project": project,
-            "source_status": source_status,
-            "source_locator_hash": locator_hash,
-            "source_locator_version_hash": locator_version_hash,
-            "observed_at": observed_at,
-        },
+        "public_summary": public_summary,
     }
 
 
@@ -275,11 +307,22 @@ def _resolve_hermes_session_locator(payload: dict) -> str:
             # through to the default store, never fabricate a path).
             return _existing_non_symlink_store(Path(value))
     hermes_home = os.environ.get("HERMES_HOME")
+    requested_profile = _requested_hermes_profile(payload)
     if hermes_home:
         default_store = Path(hermes_home) / "state.db"
+    elif requested_profile != DEFAULT_HERMES_PROFILE:
+        default_store = state_db_for_profile(default_hermes_home(), requested_profile)
     else:
         default_store = Path.home() / HERMES_DEFAULT_STATE_DB
     return _existing_non_symlink_store(default_store)
+
+
+def _requested_hermes_profile(payload: dict) -> str:
+    for key in HERMES_PROFILE_KEYS:
+        value = payload.get(key)
+        if isinstance(value, str) and value.strip():
+            return hermes_profile_from_payload({key: value})
+    return DEFAULT_HERMES_PROFILE
 
 
 def _existing_non_symlink_store(candidate: Path) -> str:

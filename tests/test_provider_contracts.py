@@ -61,6 +61,55 @@ def test_cli_provider_hook_plan_outputs_non_mutating_json(capsys) -> None:
     assert output["hook_mutation_performed"] is False
 
 
+def test_hermes_hook_plan_reports_profile_readiness_without_paths(tmp_path) -> None:
+    hermes_home = tmp_path / ".hermes"
+    default_db = hermes_home / "state.db"
+    metis_home = hermes_home / "profiles" / "metis"
+    metis_db = metis_home / "state.db"
+    default_db.parent.mkdir()
+    metis_home.mkdir(parents=True)
+    default_db.write_bytes(b"not-opened-by-hook-plan")
+    metis_db.write_bytes(b"not-opened-by-hook-plan")
+    (hermes_home / "config.yaml").write_text(
+        "hooks:\n  on_session_end:\n    - command: dendrite transcript-capture --provider hermes\n",
+        encoding="utf-8",
+    )
+
+    plan = build_provider_hook_plan(provider="hermes", action="install", hermes_home=hermes_home)
+
+    assert plan["provider"] == "hermes"
+    assert plan["mutation_performed"] is False
+    readiness = plan["profile_readiness"]
+    assert readiness["default"]["source_status"] == "source_present"
+    assert readiness["default"]["hook_status"] == "hook_present"
+    assert readiness["metis"]["source_status"] == "source_present"
+    assert readiness["metis"]["hook_status"] == "hook_missing"
+    blob = json.dumps(plan, sort_keys=True)
+    assert str(default_db) not in blob
+    assert str(metis_db) not in blob
+
+
+def test_provider_doctor_reports_hermes_profile_summary(tmp_path) -> None:
+    hermes_home = tmp_path / ".hermes"
+    default_db = hermes_home / "state.db"
+    metis_db = hermes_home / "profiles" / "metis" / "state.db"
+    default_db.parent.mkdir()
+    metis_db.parent.mkdir(parents=True)
+    default_db.write_bytes(b"not-opened-by-doctor")
+    metis_db.write_bytes(b"not-opened-by-doctor")
+
+    report = build_provider_doctor_report(hermes_home=hermes_home)
+
+    assert report["mutation_performed"] is False
+    hermes = report["provider_profile_readiness"]["hermes"]
+    assert set(hermes) == {"default", "metis"}
+    assert hermes["default"]["source_status"] == "source_present"
+    assert hermes["metis"]["source_status"] == "source_present"
+    blob = json.dumps(report, sort_keys=True)
+    assert str(default_db) not in blob
+    assert str(metis_db) not in blob
+
+
 def test_provider_event_normalizer_hashes_raw_prompt() -> None:
     payload = {
         "hook_event_name": "UserPromptSubmit",
