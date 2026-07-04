@@ -7,9 +7,10 @@ same `conversation_chunk` document for every provider.
 
 - Text-file providers (codex/claude/gemini/antigravity) store one jsonl file per
   session: the adapter reads and redacts the file as opaque text.
-- Hermes stores all sessions in one local SQLite store (`~/.hermes/state.db`): the
-  adapter opens it read-only/immutable (no locks, no WAL checkpoint, never writes),
-  selects the requested session's messages, and assembles a redacted transcript.
+- Hermes stores sessions in profile-local SQLite stores (`~/.hermes/state.db` or
+  `~/.hermes/profiles/<profile>/state.db`): the adapter opens the selected store
+  read-only/immutable (no locks, no WAL checkpoint, never writes), selects the
+  requested session's messages, and assembles a redacted transcript.
 
 dendrite still does NOT do session-memory build/promote, GC, or RAGFlow work — it
 only produces a redacted transcript document, exactly as it already did for jsonl.
@@ -63,7 +64,7 @@ class JsonlSourceAdapter(TranscriptSourceAdapter):
 
 
 class HermesSqliteSourceAdapter(TranscriptSourceAdapter):
-    """hermes: one SQLite store for all sessions; read-only, never written."""
+    """hermes: one profile-local SQLite store; read-only, never written."""
 
     def read_redacted_transcript(self, request: dict) -> str:
         locator = request.get("source_locator") or {}

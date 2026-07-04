@@ -10,6 +10,7 @@ from dendrite.transcript_migrate import (
     build_migration_request,
     default_source_roots,
     enumerate_sessions,
+    discover_hermes_profile_stores,
     migrate,
     parse_source_root_overrides,
 )
@@ -215,11 +216,64 @@ def test_hermes_migrate_dry_run_counts_sessions(tmp_path):
     assert not spool.exists() or not list((spool / "pending").glob("*.json"))
 
 
+def test_discover_hermes_profile_stores_finds_default_and_named(tmp_path):
+    hermes_home = tmp_path / ".hermes"
+    default_db = hermes_home / "state.db"
+    metis_db = hermes_home / "profiles" / "metis" / "state.db"
+    atlas_db = hermes_home / "profiles" / "atlas" / "state.db"
+    default_db.parent.mkdir()
+    metis_db.parent.mkdir(parents=True)
+    atlas_db.parent.mkdir(parents=True)
+    _make_hermes_db(default_db, {"d": [("u", "1")]})
+    _make_hermes_db(metis_db, {"m": [("u", "2")]})
+    _make_hermes_db(atlas_db, {"a": [("u", "3")]})
+
+    stores = discover_hermes_profile_stores(hermes_home)
+
+    assert [(store.profile, store.path.name) for store in stores] == [
+        ("default", "state.db"),
+        ("atlas", "state.db"),
+        ("metis", "state.db"),
+    ]
+
+
+def test_discover_hermes_profile_store_keeps_named_hermes_home_identity(tmp_path):
+    metis_home = tmp_path / ".hermes" / "profiles" / "metis"
+    metis_db = metis_home / "state.db"
+    metis_home.mkdir(parents=True)
+    _make_hermes_db(metis_db, {"m": [("u", "2")]})
+
+    stores = discover_hermes_profile_stores(metis_home)
+
+    assert [(store.profile, store.path.name) for store in stores] == [("metis", "state.db")]
+
+
+def test_hermes_migrate_dry_run_reports_profile_aggregates_without_private_values(tmp_path):
+    hermes_home = tmp_path / ".hermes"
+    default_db = hermes_home / "state.db"
+    metis_db = hermes_home / "profiles" / "metis" / "state.db"
+    default_db.parent.mkdir()
+    metis_db.parent.mkdir(parents=True)
+    _make_hermes_db(default_db, {"same-session": [("u", "1")]})
+    _make_hermes_db(metis_db, {"same-session": [("u", "2")], "metis-only": [("u", "3")]})
+
+    report = migrate(spool_root=tmp_path / "spool", roots={"hermes": hermes_home}, providers=["hermes"], dry_run=True)
+
+    hermes = report["by_provider"]["hermes"]
+    assert hermes["found"] == 3
+    assert hermes["profiles"]["default"]["found"] == 1
+    assert hermes["profiles"]["metis"]["found"] == 2
+    blob = json.dumps(report, sort_keys=True)
+    assert str(default_db) not in blob
+    assert str(metis_db) not in blob
+    assert "same-session" not in blob
+
+
 def test_hermes_migrate_spools_per_session_locator_only(tmp_path):
     db = tmp_path / "state.db"
     _make_hermes_db(db, {"a": [("u", "1")], "b": [("u", "2")]})
     spool = tmp_path / "spool"
-    report = migrate(spool_root=spool, roots={"hermes": db}, providers=["hermes"])
+    report = migrate(spool_root=spool, roots={"hermes": db}, providers=["hermes"], limit=2)
     assert report["by_provider"]["hermes"]["spooled"] == 2
 
     pending = sorted((spool / "pending").glob("*.json"))
@@ -235,6 +289,52 @@ def test_hermes_migrate_spools_per_session_locator_only(tmp_path):
     assert sids == {"a", "b"}
 
 
+def test_hermes_migrate_spools_profile_scoped_requests(tmp_path):
+    hermes_home = tmp_path / ".hermes"
+    default_db = hermes_home / "state.db"
+    metis_db = hermes_home / "profiles" / "metis" / "state.db"
+    default_db.parent.mkdir()
+    metis_db.parent.mkdir(parents=True)
+    _make_hermes_db(default_db, {"same-session": [("u", "1")]})
+    _make_hermes_db(metis_db, {"same-session": [("u", "2")]})
+    spool = tmp_path / "spool"
+
+    report = migrate(spool_root=spool, roots={"hermes": hermes_home}, providers=["hermes"], limit=1)
+
+    assert report["by_provider"]["hermes"]["profiles"]["default"]["spooled"] == 1
+    assert report["by_provider"]["hermes"]["profiles"]["metis"]["spooled"] == 1
+    pending = sorted((spool / "pending").glob("*.json"))
+    requests = [json.loads(path.read_text(encoding="utf-8")) for path in pending]
+    assert {request["hermes_profile"] for request in requests} == {"default", "metis"}
+    assert len({request["session_id_hash"] for request in requests}) == 2
+
+
+def test_hermes_migrate_can_filter_named_profile(tmp_path):
+    hermes_home = tmp_path / ".hermes"
+    default_db = hermes_home / "state.db"
+    metis_db = hermes_home / "profiles" / "metis" / "state.db"
+    default_db.parent.mkdir()
+    metis_db.parent.mkdir(parents=True)
+    _make_hermes_db(default_db, {"default-session": [("u", "1")]})
+    _make_hermes_db(metis_db, {"metis-session": [("u", "2")]})
+    spool = tmp_path / "spool"
+
+    report = migrate(
+        spool_root=spool,
+        roots={"hermes": hermes_home},
+        providers=["hermes"],
+        hermes_profiles=["metis"],
+        limit=1,
+    )
+
+    assert set(report["by_provider"]["hermes"]["profiles"]) == {"metis"}
+    pending = sorted((spool / "pending").glob("*.json"))
+    assert len(pending) == 1
+    request = json.loads(pending[0].read_text(encoding="utf-8"))
+    assert request["hermes_profile"] == "metis"
+    assert request["session_id"] == "metis-session"
+
+
 def test_hermes_migrate_limit(tmp_path):
     db = tmp_path / "state.db"
     _make_hermes_db(db, {"a": [("u", "1")], "b": [("u", "2")], "c": [("u", "3")]})
@@ -248,8 +348,8 @@ def test_hermes_migrate_is_idempotent(tmp_path):
     db = tmp_path / "state.db"
     _make_hermes_db(db, {"a": [("u", "1")], "b": [("u", "2")]})
     spool = tmp_path / "spool"
-    migrate(spool_root=spool, roots={"hermes": db}, providers=["hermes"])
-    migrate(spool_root=spool, roots={"hermes": db}, providers=["hermes"])
+    migrate(spool_root=spool, roots={"hermes": db}, providers=["hermes"], limit=2)
+    migrate(spool_root=spool, roots={"hermes": db}, providers=["hermes"], limit=2)
     # second run must not create duplicate spool files
     assert len(list((spool / "pending").glob("*.json"))) == 2
 
@@ -259,13 +359,27 @@ def test_hermes_migrate_report_is_path_and_session_id_free(tmp_path):
     # session ids (guards against a future "add root for symmetry" edit).
     db = tmp_path / "state.db"
     _make_hermes_db(db, {"sess-aaa": [("user", "1")], "sess-bbb": [("user", "2")]})
-    report = migrate(spool_root=tmp_path / "spool", roots={"hermes": db}, providers=["hermes"])
+    report = migrate(spool_root=tmp_path / "spool", roots={"hermes": db}, providers=["hermes"], limit=2)
     hermes = report["by_provider"]["hermes"]
     assert "root" not in hermes
     blob = json.dumps(report)
     assert str(db) not in blob
     assert "sess-aaa" not in blob
     assert "sess-bbb" not in blob
+
+
+def test_hermes_migrate_blocks_unbounded_non_dry_run(tmp_path):
+    db = tmp_path / "state.db"
+    _make_hermes_db(db, {"sess-aaa": [("user", "1")], "sess-bbb": [("user", "2")]})
+    spool = tmp_path / "spool"
+
+    report = migrate(spool_root=spool, roots={"hermes": db}, providers=["hermes"])
+
+    hermes = report["by_provider"]["hermes"]
+    assert hermes["status"] == "bounded_limit_required"
+    assert hermes["found"] == 2
+    assert hermes["spooled"] == 0
+    assert not spool.exists() or not list((spool / "pending").glob("*.json"))
 
 
 def test_hermes_migrate_root_unavailable(tmp_path):

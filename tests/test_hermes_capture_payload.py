@@ -1,11 +1,10 @@
 """Hermes provider capture tests.
 
-Hermes Agent (Nous Research) stores all sessions in one local SQLite store
-(`~/.hermes/state.db`), not per-session jsonl files. dendrite captures locator-only
-(it records the store path, never the body, at capture time), and at drain time a
-HermesSqliteSourceAdapter opens the store read-only/immutable, selects the one
-session, and ships the same redacted `conversation_chunk` as the jsonl providers.
-These tests pin that contract.
+Hermes Agent (Nous Research) stores sessions in profile-local SQLite stores, not
+per-session jsonl files. dendrite captures locator-only (it records the store path,
+never the body, at capture time), and at drain time a HermesSqliteSourceAdapter
+opens the store read-only/immutable, selects the one session, and ships the same
+redacted `conversation_chunk` as the jsonl providers. These tests pin that contract.
 """
 
 import hashlib
@@ -175,8 +174,36 @@ def test_hermes_session_hash_uses_provider_prefixed_scheme(tmp_path):
     request = normalize_provider_capture_request(
         "hermes", _hermes_session_payload(str(db)), project=PROJECT
     )
-    expected = "sha256:" + hashlib.sha256(f"hermes:{HERMES_SESSION_ID}".encode("utf-8")).hexdigest()
+    expected = "sha256:" + hashlib.sha256(f"hermes:default:{HERMES_SESSION_ID}".encode("utf-8")).hexdigest()
     assert request["session_id_hash"] == expected
+
+
+def test_hermes_profile_identity_separates_hash_and_agent_id(tmp_path):
+    default_home = tmp_path / ".hermes"
+    metis_home = default_home / "profiles" / "metis"
+    default_home.mkdir()
+    metis_home.mkdir(parents=True)
+    default_db = default_home / "state.db"
+    metis_db = metis_home / "state.db"
+    _write_hermes_state_db(default_db)
+    _write_hermes_state_db(metis_db)
+
+    default_request = normalize_provider_capture_request(
+        "hermes", _hermes_session_payload(str(default_db)), project=PROJECT
+    )
+    metis_request = normalize_provider_capture_request(
+        "hermes", _hermes_session_payload(str(metis_db)), project=PROJECT
+    )
+
+    assert default_request["hermes_profile"] == "default"
+    assert metis_request["hermes_profile"] == "metis"
+    assert default_request["session_id_hash"] != metis_request["session_id_hash"]
+    assert metis_request["agent_id"] == "hermes-metis-transcript-capture"
+    assert metis_request["public_summary"]["hermes_profile"] == "metis"
+    assert metis_request["public_summary"]["agent_id"] == "hermes-metis-transcript-capture"
+    public_blob = json.dumps(metis_request["public_summary"], sort_keys=True)
+    assert str(metis_db) not in public_blob
+    assert HERMES_SESSION_ID not in public_blob
 
 
 def test_hermes_capture_resolves_default_db_from_hermes_home(tmp_path, monkeypatch):
@@ -288,6 +315,20 @@ def test_hermes_drain_ships_conversation_chunk_for_the_session(tmp_path):
     for surface in (body, metadata_json, json.dumps(call["source"], sort_keys=True)):
         assert str(db) not in surface
         assert HERMES_SESSION_ID not in surface
+
+
+def test_hermes_drain_uses_profile_specific_agent_metadata(tmp_path):
+    metis_home = tmp_path / ".hermes" / "profiles" / "metis"
+    metis_home.mkdir(parents=True)
+    db = metis_home / "state.db"
+    _write_hermes_state_db(db)
+
+    _report, ingress = _capture_and_drain(tmp_path, db)
+
+    metadata = ingress.calls[0]["packed"].metadata
+    assert metadata["provider"] == "hermes"
+    assert metadata["hermes_profile"] == "metis"
+    assert metadata["agent_id"] == "hermes-metis-transcript-capture"
 
 
 def test_hermes_drain_redacts_secrets_from_db_content(tmp_path):
@@ -434,3 +475,42 @@ def test_cli_transcript_capture_hermes_spools_without_leaking_path(tmp_path, mon
     assert HERMES_SESSION_ID not in output_text
     pending = next((tmp_path / "capture-spool" / "pending").glob("*.json"))
     assert stat.S_IMODE(pending.stat().st_mode) == 0o600
+
+
+def test_cli_transcript_capture_hermes_profile_resolves_named_store(tmp_path, monkeypatch, capsys):
+    home = tmp_path / "home"
+    metis_home = home / ".hermes" / "profiles" / "metis"
+    metis_home.mkdir(parents=True)
+    db = metis_home / "state.db"
+    _write_hermes_state_db(db)
+    monkeypatch.setenv("HOME", str(home))
+    payload = {
+        "hook_event_name": "on_session_end",
+        "session_id": HERMES_SESSION_ID,
+        "workspacePaths": ["/Users/ddalkak/Projects/dendrite"],
+    }
+    monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps(payload)))
+
+    assert (
+        main(
+            [
+                "transcript-capture",
+                "--provider",
+                "hermes",
+                "--hermes-profile",
+                "metis",
+                "--project",
+                PROJECT,
+                "--spool",
+                str(tmp_path / "capture-spool"),
+                "--stdin-json",
+            ]
+        )
+        == 0
+    )
+
+    output_text = capsys.readouterr().out
+    assert str(db) not in output_text
+    stored = json.loads(next((tmp_path / "capture-spool" / "pending").glob("*.json")).read_text(encoding="utf-8"))
+    assert stored["hermes_profile"] == "metis"
+    assert stored["source_locator"]["runtime_handle"] == str(db)

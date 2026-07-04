@@ -3,7 +3,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 import hashlib
 import json
+from pathlib import Path
 import shlex
+
+from .hermes_profiles import build_hermes_profile_readiness
 
 
 SUPPORTED_PROVIDERS = {"claude", "gemini", "codex", "antigravity", "hermes"}
@@ -195,6 +198,7 @@ def build_provider_doctor_report(
     *,
     contract_source: str = "committed_defaults",
     seeded_defaults: bool = False,
+    hermes_home: str | Path | None = None,
 ) -> dict:
     selected_contracts = build_default_provider_source_contracts() if contracts is None else contracts
     return {
@@ -207,6 +211,9 @@ def build_provider_doctor_report(
         "mutation_performed": False,
         "summary": {contract.provider: contract.verification_status for contract in selected_contracts},
         "provider_parser_matrix": build_provider_parser_matrix(selected_contracts),
+        "provider_profile_readiness": {
+            "hermes": build_hermes_profile_readiness(hermes_home),
+        },
         "providers": {contract.provider: contract.to_record() for contract in selected_contracts},
     }
 
@@ -247,12 +254,14 @@ def build_provider_hook_plan(
     dendrite_command: str = "dendrite",
     project: str = "<project>",
     capture_spool: str = "<private-transcript-capture-spool>",
+    hermes_home: str | Path | None = None,
 ) -> dict:
     if provider not in SUPPORTED_PROVIDERS:
         raise ValueError(f"unsupported provider: {provider}")
     if action not in SUPPORTED_HOOK_ACTIONS:
         raise ValueError(f"unsupported hook action: {action}")
     contract = _contract_for(provider)
+    profile_readiness = build_hermes_profile_readiness(hermes_home) if provider == "hermes" else {}
     approval_required_fields = [
         "exact_argv",
         "timeout_seconds",
@@ -274,6 +283,7 @@ def build_provider_hook_plan(
             "exact_target": _exact_target(contract),
             "planned_argv": [],
             "contract": contract.to_record(),
+            "profile_readiness": profile_readiness,
             "requires_approval_before_execution": True,
             "approval_required_fields": approval_required_fields,
             "blocker": {
@@ -303,6 +313,7 @@ def build_provider_hook_plan(
             "exact_target": _exact_target(contract),
             "planned_argv": [],
             "contract": contract.to_record(),
+            "profile_readiness": profile_readiness,
             "requires_approval_before_execution": True,
             "approval_required_fields": approval_required_fields,
             "blocker": {
@@ -336,6 +347,7 @@ def build_provider_hook_plan(
             capture_spool=capture_spool,
         ),
         "contract": contract.to_record(),
+        "profile_readiness": profile_readiness,
         "requires_approval_before_execution": True,
         "approval_required_fields": approval_required_fields,
         **_provider_config_plan(
