@@ -5,8 +5,9 @@ One interface, one adapter per provider storage shape. The thin shipper
 adapter and gets back a single redacted transcript text, then packs it into the
 same `conversation_chunk` document for every provider.
 
-- Text-file providers (codex/claude/gemini/antigravity) store one jsonl file per
-  session: the adapter reads and redacts the file as opaque text.
+- Text-file providers (codex/claude/gemini/antigravity/grok) store one jsonl file
+  per session (Grok: ``updates.jsonl``): the adapter reads and redacts the file as
+  opaque text.
 - Hermes stores sessions in profile-local SQLite stores (`~/.hermes/state.db` or
   `~/.hermes/profiles/<profile>/state.db`): the adapter opens the selected store
   read-only/immutable (no locks, no WAL checkpoint, never writes), selects the
@@ -51,7 +52,7 @@ class TranscriptSourceAdapter:
 
 
 class JsonlSourceAdapter(TranscriptSourceAdapter):
-    """codex/claude/gemini/antigravity: one jsonl file per session (opaque text)."""
+    """codex/claude/gemini/antigravity/grok: one jsonl file per session (opaque text)."""
 
     def read_redacted_transcript(self, request: dict) -> str:
         locator = request.get("source_locator") or {}

@@ -27,8 +27,9 @@ from .transcript_capture import (
 )
 from .transcript_source import enumerate_hermes_sessions
 
-MIGRATION_PROVIDERS = ("codex", "claude", "gemini", "antigravity", "hermes")
+MIGRATION_PROVIDERS = ("codex", "claude", "gemini", "antigravity", "hermes", "grok")
 SESSION_GLOB = "**/*.jsonl"
+GROK_UPDATES_NAME = "updates.jsonl"
 
 
 def default_source_roots() -> dict[str, Path]:
@@ -36,18 +37,20 @@ def default_source_roots() -> dict[str, Path]:
 
     Note: codex/claude/gemini/antigravity roots are directories of jsonl session
     files; the hermes root is a Hermes home directory (~/.hermes) or a single
-    SQLite store file for compatibility.
+    SQLite store file for compatibility; the grok root is ``$GROK_HOME/sessions``.
     """
     home = Path.home()
     codex_home = Path(os.environ.get("CODEX_HOME") or (home / ".codex"))
     hermes_home = os.environ.get("HERMES_HOME")
     hermes_root = Path(hermes_home) if hermes_home else (home / ".hermes")
+    grok_home = Path(os.environ.get("GROK_HOME") or (home / ".grok"))
     return {
         "codex": codex_home / "sessions",
         "claude": home / ".claude" / "projects",
         "gemini": home / ".gemini",
         "antigravity": home / ".antigravity",
         "hermes": hermes_root,
+        "grok": grok_home / "sessions",
     }
 
 
@@ -79,6 +82,34 @@ def build_hermes_migration_request(
     """
     payload = {"transcript_path": str(db_path), "session_id": session_id, "hermes_profile": profile}
     return normalize_provider_capture_request("hermes", payload, project=project)
+
+
+def build_grok_migration_request(path: Path, *, project: str = "") -> dict:
+    """Build a locator-only capture request for one historical Grok session file.
+
+    Session id is the parent directory name (``…/<session-id>/updates.jsonl``).
+    """
+    path = Path(path)
+    session_id = path.parent.name
+    payload = {
+        "hook_event_name": "Stop",
+        "transcript_path": str(path),
+        "session_id": session_id,
+        "sessionId": session_id,
+    }
+    return normalize_provider_capture_request("grok", payload, project=project)
+
+
+def enumerate_grok_sessions(root: Path) -> list[Path]:
+    """Return each session's ``updates.jsonl`` under ``root`` (no other jsonl)."""
+    root = Path(root)
+    if not root.is_dir():
+        return []
+    return sorted(
+        path
+        for path in root.rglob(GROK_UPDATES_NAME)
+        if path.is_file() and not path.is_symlink()
+    )
 
 
 @dataclass
@@ -135,6 +166,10 @@ def migrate(
                 dry_run=dry_run,
                 report=report,
             )
+        elif provider == "grok":
+            summary = _migrate_grok(
+                roots.get("grok"), spool, project=project, limit=limit, dry_run=dry_run, report=report
+            )
         else:
             summary = _migrate_jsonl(
                 provider, roots.get(provider), spool, project=project, limit=limit, dry_run=dry_run, report=report
@@ -172,6 +207,37 @@ def _migrate_jsonl(
             errors += 1
             report.record_error_class(exc)
     return {"status": "ok", "root": str(root), "found": len(files), "spooled": spooled, "errors": errors}
+
+
+def _migrate_grok(
+    root: Path | None,
+    spool: TranscriptCaptureSpool | None,
+    *,
+    project: str,
+    limit: int | None,
+    dry_run: bool,
+    report: MigrationReport,
+) -> dict:
+    """Migrate Grok sessions: one ``updates.jsonl`` per session directory.
+
+    Report carries counts only — never the source root path or session ids
+    (same privacy posture as Hermes migrate).
+    """
+    if not root or not Path(root).is_dir():
+        return {"status": "root_unavailable", "found": 0, "spooled": 0, "errors": 0}
+    files = _limit_items(enumerate_grok_sessions(Path(root)), limit)
+    spooled = 0
+    errors = 0
+    for path in files:
+        try:
+            request = build_grok_migration_request(path, project=project)
+            if not dry_run:
+                spool.enqueue(request)
+            spooled += 1
+        except Exception as exc:  # noqa: BLE001 - per-file fail-soft; count + continue
+            errors += 1
+            report.record_error_class(exc)
+    return {"status": "ok", "found": len(files), "spooled": spooled, "errors": errors}
 
 
 def _migrate_hermes(
@@ -292,10 +358,12 @@ def parse_source_root_overrides(values: list[str] | None) -> dict[str, Path]:
 __all__ = [
     "MIGRATION_PROVIDERS",
     "MigrationReport",
+    "build_grok_migration_request",
     "build_hermes_migration_request",
     "build_migration_request",
     "default_source_roots",
     "discover_hermes_profile_stores",
+    "enumerate_grok_sessions",
     "enumerate_sessions",
     "migrate",
     "parse_source_root_overrides",
