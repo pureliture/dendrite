@@ -9,7 +9,7 @@ import shlex
 from .hermes_profiles import build_hermes_profile_readiness
 
 
-SUPPORTED_PROVIDERS = {"claude", "gemini", "codex", "antigravity", "hermes"}
+SUPPORTED_PROVIDERS = {"claude", "gemini", "codex", "antigravity", "hermes", "grok"}
 SUPPORTED_HOOK_ACTIONS = {"install", "uninstall"}
 
 
@@ -190,6 +190,29 @@ def build_default_provider_source_contracts() -> list[ProviderSourceContract]:
                 "not yet live-verified against a real hermes install."
             ),
         ),
+        ProviderSourceContract(
+            contract_id="grok-stop-updates-jsonl.v1",
+            provider="grok",
+            provider_version="0.2.93",
+            installed_version_evidence="2026-07-09_research_gate:grok 0.2.93",
+            hook_event="Stop",
+            source_locator_field="transcriptPath",
+            parser_version="provider-transcript-parser.v1",
+            native_parser_status="native_parser_unverified_grok_updates_jsonl",
+            privacy_redaction_status="privacy_redaction_unverified",
+            verification_status="source_locator_unverified",
+            source_status="source_locator_unverified",
+            hook_install_status="deferred_not_installed",
+            rollback_state="not_installed_no_runtime_rollback_needed",
+            evidence_hash="pending_operator_source_smoke",
+            redacted_evidence_ref="docs/live/grok-build-research-gate.md",
+            raw_prompt_policy="locator_only_not_transcript_content",
+            unsupported_reason=(
+                "grok Build stores sessions under GROK_HOME/sessions/<cwd>/<id>/updates.jsonl; "
+                "live Stop hook provides transcriptPath. dendrite ships opaque conversation_chunk. "
+                "source contract not yet operator-verified for hook install."
+            ),
+        ),
     ]
 
 
@@ -299,6 +322,13 @@ def build_provider_hook_plan(
                     "Do not install provider hooks until the source contract is verified.",
                 ],
             },
+            **_provider_config_plan(
+                contract,
+                action=action,
+                dendrite_command=dendrite_command,
+                project=project,
+                capture_spool=capture_spool,
+            ),
         }
     if action == "install" and contract.hook_install_status == "blocked_native_parser_unverified":
         return {
@@ -329,6 +359,13 @@ def build_provider_hook_plan(
                     "Do not install provider hooks until native parser readiness is approved.",
                 ],
             },
+            **_provider_config_plan(
+                contract,
+                action=action,
+                dendrite_command=dendrite_command,
+                project=project,
+                capture_spool=capture_spool,
+            ),
         }
     return {
         "schema_version": "agent_knowledge_provider_hook_plan.v1",
@@ -459,7 +496,7 @@ def _provider_config_plan(
     project: str,
     capture_spool: str,
 ) -> dict:
-    if contract.provider not in {"claude", "antigravity"}:
+    if contract.provider not in {"claude", "antigravity", "grok"}:
         return {}
     planned_argv = _planned_argv(
         contract,
@@ -501,7 +538,7 @@ def _provider_config_plan(
                 ],
             }
         }
-    elif contract.provider == "antigravity":
+    if contract.provider == "antigravity":
         hook_entry = {
             "type": "command",
             "command": _shell_join(planned_argv),
@@ -530,6 +567,44 @@ def _provider_config_plan(
                 ],
             }
         }
+    # grok
+    hook_entry = {
+        "type": "command",
+        "command": _shell_join(planned_argv),
+        "timeout": 10,
+    }
+    return {
+        "provider_config": {
+            "schema_version": "agent_knowledge_grok_build_hook_plan.v1",
+            "provider": "grok",
+            "action": action,
+            "config_format": "grok_hooks_json",
+            "config_scope": "grok_global_hooks",
+            "candidate_write_targets": [
+                "~/.grok/hooks/*.json",
+                "<project>/.grok/hooks/*.json",
+            ],
+            "event": contract.hook_event or "Stop",
+            "managed_entry": {
+                "hooks": {
+                    (contract.hook_event or "Stop"): [
+                        {
+                            "hooks": [hook_entry],
+                        }
+                    ]
+                }
+            },
+            "merge_strategy": "append_only_to_hooks_Stop_without_rewriting_existing_entries",
+            "install_performed": False,
+            "provider_config_mutation_performed": False,
+            "postcheck": [
+                "hook JSON under ~/.grok/hooks/ parses after adding the managed Stop entry",
+                "Stop hook command matches the approved transcript-capture argv",
+                "hook writes locator-only capture requests to the private capture spool",
+                "no RAGFlow credential or transcript body is present in the hook entry",
+            ],
+        }
+    }
 
 
 def _opposite_action(action: str) -> str:

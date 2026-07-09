@@ -30,15 +30,19 @@ RAW_TRANSCRIPT_FIELDS = {
     "transcript_content",
     "turns",
 }
-SUPPORTED_TRANSCRIPT_PROVIDERS = {"claude", "gemini", "codex", "antigravity", "hermes"}
+SUPPORTED_TRANSCRIPT_PROVIDERS = {"claude", "gemini", "codex", "antigravity", "hermes", "grok"}
 SOURCE_UNPROVEN_PROVIDERS: set[str] = set()
-CODEX_SESSION_ID_PATTERN = re.compile(r"^[A-Za-z0-9_.:-]{8,160}$")
+# Shared pattern for provider session ids (codex, grok, …).
+SESSION_ID_PATTERN = re.compile(r"^[A-Za-z0-9_.:-]{8,160}$")
+CODEX_SESSION_ID_PATTERN = SESSION_ID_PATTERN  # backward-compatible alias
 HERMES_DEFAULT_STATE_DB = ".hermes/state.db"
 HERMES_LOCATOR_KEYS = ("hermes_db_path", "state_db_path", "session_db_path")
 HERMES_PROFILE_KEYS = ("hermes_profile", "profile", "profile_name")
 PROJECT_SOURCE_PATH_KEYS = (
     "workspacePath",
     "workspace_path",
+    "workspaceRoot",
+    "workspace_root",
     "cwd",
     "currentWorkingDirectory",
     "current_working_directory",
@@ -143,6 +147,8 @@ def _looks_like_provider_storage_path(value: str) -> bool:
     if _contains_subsequence(parts, [".claude", "projects"]):
         return True
     if _contains_subsequence(parts, [".gemini", "antigravity-cli", "brain"]):
+        return True
+    if _contains_subsequence(parts, [".grok", "sessions"]) or ".grok" in parts:
         return True
     if ".hermes" in parts:
         return True
@@ -269,11 +275,14 @@ def normalize_provider_capture_request(provider: str, payload: dict, *, project:
 def _extract_source_locator(provider: str, payload: dict) -> str:
     if provider in SOURCE_UNPROVEN_PROVIDERS:
         return ""
-    # Hermes resolves its own locator (with an existence + non-symlink guard) before
-    # the generic key loop, so the documented transcript_path key still gets the
-    # store-existence guarantee the design promises (no fabricated path).
-    if provider == "hermes":
-        locator = _resolve_hermes_session_locator(payload)
+    # Hermes/Grok resolve their own locator (existence + non-symlink guard) before
+    # the generic key loop, so explicit transcript_path still gets the no-fabricated-
+    # path guarantee. Empty result means "no locator", not fall-through.
+    if provider in {"hermes", "grok"}:
+        if provider == "hermes":
+            locator = _resolve_hermes_session_locator(payload)
+        else:
+            locator = _resolve_grok_session_locator(payload)
         if locator:
             _validate_locator_value(locator)
             return locator
@@ -335,12 +344,64 @@ def _existing_non_symlink_store(candidate: Path) -> str:
 def _provider_session_id(provider: str, payload: dict) -> str:
     if provider == "antigravity":
         return str(payload.get("conversationId") or payload.get("conversation_id") or "")
+    if provider == "grok":
+        return _grok_session_id(payload)
     return ""
+
+
+def _grok_session_id(payload: dict) -> str:
+    """Grok hook payloads use camelCase ``sessionId``; accept snake_case too."""
+    return str(payload.get("sessionId") or payload.get("session_id") or "")
+
+
+def _resolve_grok_session_locator(payload: dict) -> str:
+    """Resolve Grok Build ``updates.jsonl`` without reading its content.
+
+    Prefer an explicit ``transcriptPath`` when it is a real non-symlink file.
+    If the explicit path is missing, a symlink, or otherwise unusable, fall through
+    to ``$GROK_HOME/sessions/**/<sessionId>/updates.jsonl``. Never fabricates a path.
+    """
+    for key in ("transcript_path", "transcriptPath", "source_locator", "runtime_handle"):
+        value = payload.get(key)
+        if isinstance(value, str) and value:
+            existing = _existing_non_symlink_store(Path(value))
+            if existing:
+                return existing
+            # Explicit path present but unusable (missing/symlink): try sessionId resolve.
+    session_id = _grok_session_id(payload)
+    if not session_id or not SESSION_ID_PATTERN.fullmatch(session_id):
+        return ""
+    grok_home = Path(os.environ.get("GROK_HOME") or (Path.home() / ".grok"))
+    sessions_root = grok_home / "sessions"
+    if not sessions_root.is_dir():
+        return ""
+    try:
+        matches = [
+            path
+            for path in sessions_root.rglob("updates.jsonl")
+            if path.is_file() and not path.is_symlink() and path.parent.name == session_id
+        ]
+        if not matches:
+            return ""
+        # Prefer newest; skip unstatable paths (race between list and stat).
+        best: Path | None = None
+        best_mtime = -1
+        for path in matches:
+            try:
+                mtime = path.stat().st_mtime
+            except OSError:
+                continue
+            if mtime >= best_mtime:
+                best_mtime = mtime
+                best = path
+        return str(best) if best is not None else ""
+    except OSError:
+        return ""
 
 
 def _resolve_codex_session_locator(payload: dict) -> str:
     session_id = str(payload.get("session_id") or "")
-    if not CODEX_SESSION_ID_PATTERN.fullmatch(session_id):
+    if not SESSION_ID_PATTERN.fullmatch(session_id):
         return ""
     codex_home = Path(os.environ.get("CODEX_HOME") or (Path.home() / ".codex"))
     sessions_root = codex_home / "sessions"
@@ -380,7 +441,7 @@ def _validate_locator_value(value: str) -> None:
 
 
 def _capture_event_type(provider: str, payload: dict) -> str:
-    hook_event_name = payload.get("hook_event_name")
+    hook_event_name = payload.get("hook_event_name") or payload.get("hookEventName")
     if provider == "gemini" and hook_event_name == "SessionEnd":
         return "session_end"
     if provider == "codex" and hook_event_name == "Stop":
@@ -401,6 +462,8 @@ def _capture_event_type(provider: str, payload: dict) -> str:
         "on_session_end",
         "on_session_finalize",
     }:
+        return "session_end"
+    if provider == "grok" and hook_event_name in {"Stop", "stop", "SessionEnd", "session_end"}:
         return "session_end"
     return str(payload.get("event_type") or "session_end")
 
