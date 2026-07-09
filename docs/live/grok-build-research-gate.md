@@ -120,8 +120,6 @@ So for live capture, Stop payload already carries a usable locator to SoT when p
 | Path | Content |
 | --- | --- |
 | `docs/live/sessionend-smoke.ndjson` | Redacted hook records (start/stop) |
-| `docs/live/stop-transcript-basename.ndjson` | Basename-only transcriptPath check |
-| `docs/live/sessionend-smoke-hook.sh` | Research logger (optional keep) |
-| `docs/live/basename-hook.sh` | Basename logger (optional keep) |
+| `docs/live/stop-transcript-basename.ndjson` | Basename-only transcriptPath check (session id redacted) |
 
-Temporary `~/.grok/hooks/dendrite-sessionend-research-smoke.json` **removed** after smoke.
+Temporary research hooks under `~/.grok/hooks/` and local one-off logger scripts were **removed** after smoke.
