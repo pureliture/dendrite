@@ -32,6 +32,7 @@
 ## Amendments and pending decisions
 
 - requirements/design의 behavior와 boundary를 보존한 agentic implementation amendment가 있다: metadata discovery를 metadata root 바로 아래 `.db`와 `conversations/` 하위 `.db`로 제한한다.
+- PR review follow-up amendment: 현재 layout의 root-level `conversation_summaries.db`를 우선 조회하고, canonical store가 있으면 metadata miss에서 nested `.db` 재탐색을 생략한다. canonical store가 없을 때만 기존 bounded fallback 후보를 탐색한다.
 - amendment alternatives: 새 설정 계약, metadata root 전체 scan, fallback-only, defer는 각각 추가 책임·과도한 탐색·요구사항 미충족·현재 결과 미달로 선택하지 않았다.
 - amendment owner: `dendrite` Antigravity capture resolver; operation은 local summary store read-only/immutable query다.
 - 새 authority, privacy, public contract, runtime ownership 결정은 필요 시 사용자 승인으로 되돌린다.
@@ -43,6 +44,7 @@
 - 삭제한 책임: 없음. 기존 `conversations/` 후보 탐색은 root-level summary store를 포함하는 bounded discovery로 확장되었고 별도 compatibility path로 남기지 않았다.
 - Compatibility path: payload workspace 우선, `agy-headless-capture` launch-dir 유지, conversationId 부재 시 기존 `--project` fallback 유지.
 - Obsolete tests: 기존 Antigravity workspace 부재 테스트는 session id 부재 fallback을 검증하도록 갱신했으며 삭제한 테스트는 없다.
+- Review follow-up evidence: canonical root store가 존재하는 metadata miss에서 SQLite open이 1회로 제한되는 regression test를 추가했고, 기존 focused/full verification을 다시 수행한다.
 - Remaining gap: 실제 `agy --print` 종료 이벤트를 발생시키는 live hook smoke와 production ingress/runtime 검증은 수행하지 않았다.
 - Deferred: provider config/LaunchAgent mutation, Antigravity core 변경, `neurons` server/GC/RAGFlow 운영 작업은 승인 범위 밖으로 남겼다.
 

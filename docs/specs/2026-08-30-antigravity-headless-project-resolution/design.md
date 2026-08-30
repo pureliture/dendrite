@@ -23,9 +23,11 @@ Issue #7의 제안에 따라 Antigravity capture의 기존 project resolver에 c
 
 requirements와 privacy boundary를 유지하면서 현재 observable result에 도달하는 가장 작은 선택으로 metadata root 바로 아래의 `.db`와 `conversations/` 하위 `.db`만 후보로 탐색하도록 확장했다.
 
+리뷰 후속에서는 현재 layout의 canonical root-level `conversation_summaries.db`를 우선 사용하도록 좁혔다. canonical store가 존재하면 metadata miss에서 nested store를 재탐색하지 않고, canonical store가 없을 때만 기존 bounded fallback 후보를 사용한다.
+
 canonical owner는 `dendrite`의 Antigravity capture resolver이고, operation responsibility는 local conversation summary store의 read-only/immutable query다.
 
-기존 `conversations/` 전용 후보 집합은 별도 compatibility path가 아니며, root-level 후보를 포함하는 bounded discovery로 대체되었다. provider transcript tree 전체 scan, 새로운 설정 계약, metadata write-back은 이 amendment의 범위가 아니다.
+기존 `conversations/` 전용 후보 집합은 별도 compatibility path가 아니며, root-level canonical store 우선과 canonical store 부재 시 nested 후보를 포함하는 bounded discovery로 대체되었다. provider transcript tree 전체 scan, 새로운 설정 계약, metadata write-back은 이 amendment의 범위가 아니다.
 
 focused tests와 raw value를 출력하지 않는 live metadata smoke에서 metadata hit을 확인한 뒤 이 amendment를 기록했다.
 
@@ -64,6 +66,8 @@ resolver는 raw workspace path, conversation id, SQLite filename, SQL error를 p
 store open은 `mode=ro&immutable=1` 또는 동등한 no-write/no-checkpoint 방식으로 제한한다.
 
 metadata store discovery는 현재 Antigravity local metadata layout에 존재하는 conversation summary store만 대상으로 하며, transcript body나 provider storage tree를 검색하지 않는다.
+
+현재 layout에서 root-level `conversation_summaries.db`가 있으면 해당 store 하나만 조회한다. root-level canonical store가 없을 때만 metadata root의 다른 `.db`와 `conversations/` 하위 `.db`를 bounded fallback 후보로 탐색한다.
 
 ### Session fallback
 

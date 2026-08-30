@@ -43,6 +43,7 @@ HERMES_PROFILE_KEYS = ("hermes_profile", "profile", "profile_name")
 ANTIGRAVITY_HOME_ENV = "ANTIGRAVITY_HOME"
 ANTIGRAVITY_DEFAULT_HOME = ".gemini/antigravity-cli"
 ANTIGRAVITY_CONVERSATIONS_DIR = "conversations"
+ANTIGRAVITY_SUMMARY_STORE_NAME = "conversation_summaries.db"
 ANTIGRAVITY_SUMMARY_TABLE = "conversation_summaries"
 PROJECT_SOURCE_PATH_KEYS = (
     "workspacePath",
@@ -400,15 +401,22 @@ def _resolve_antigravity_workspace(conversation_id: str) -> str:
 def _antigravity_summary_stores():
     home = Path(os.environ.get(ANTIGRAVITY_HOME_ENV) or (Path.home() / ANTIGRAVITY_DEFAULT_HOME)).expanduser()
     try:
-        stores = [path for path in home.glob("*.db") if path.is_file() and not path.is_symlink()]
+        root_stores = tuple(
+            path for path in home.glob("*.db") if path.is_file() and not path.is_symlink()
+        )
+        canonical = tuple(path for path in root_stores if path.name == ANTIGRAVITY_SUMMARY_STORE_NAME)
+        if canonical:
+            return canonical
+
         conversations = home / ANTIGRAVITY_CONVERSATIONS_DIR
+        nested_stores = ()
         if conversations.is_dir():
-            stores.extend(
+            nested_stores = tuple(
                 path
                 for path in conversations.rglob("*.db")
                 if path.is_file() and not path.is_symlink()
             )
-        return tuple(sorted(set(stores)))
+        return tuple(sorted(set(root_stores + nested_stores)))
     except OSError:
         return ()
 
