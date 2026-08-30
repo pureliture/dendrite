@@ -1,12 +1,14 @@
 import json
 import hashlib
 import io
+import sqlite3
 import stat
 from datetime import datetime
 
 import pytest
 
 from dendrite.cli import main
+from dendrite import transcript_capture
 from dendrite.transcript_capture import (
     TranscriptCaptureSpool,
     has_workspace_path,
@@ -34,6 +36,25 @@ def _antigravity_stop_payload(transcript_path: str) -> dict:
         "transcriptPath": transcript_path,
         "artifactDirectoryPath": "/tmp/antigravity-artifacts",
     }
+
+
+def _write_antigravity_summary_store(root, rows, *, nested=True):
+    store = (
+        root / "conversations" / "conversation_summaries.db"
+        if nested
+        else root / "conversation_summaries.db"
+    )
+    store.parent.mkdir(parents=True)
+    with sqlite3.connect(store) as connection:
+        connection.execute(
+            "CREATE TABLE conversation_summaries "
+            "(conversation_id TEXT, workspace_uris TEXT)"
+        )
+        connection.executemany(
+            "INSERT INTO conversation_summaries (conversation_id, workspace_uris) VALUES (?, ?)",
+            [(conversation_id, json.dumps(workspaces)) for conversation_id, workspaces in rows],
+        )
+    return store
 
 
 def test_antigravity_stop_payload_extracts_transcript_path_locator(tmp_path):
@@ -243,6 +264,140 @@ def test_project_derived_from_cli_workspace_path(tmp_path):
     assert request["public_summary"]["project"] == "my-cli-project"
 
 
+def test_antigravity_project_derived_from_conversation_metadata(tmp_path, monkeypatch):
+    transcript = tmp_path / "transcript.jsonl"
+    transcript.write_text("{}\n", encoding="utf-8")
+    metadata_root = tmp_path / "antigravity"
+    _write_antigravity_summary_store(
+        metadata_root,
+        [(CONVERSATION_ID, ["file:///Users/ddalkak/Projects/metadata-project"])],
+    )
+    monkeypatch.setenv("ANTIGRAVITY_HOME", str(metadata_root))
+    payload = _antigravity_stop_payload(str(transcript))
+    payload["workspacePaths"] = []
+
+    request = normalize_provider_capture_request("antigravity", payload, project=PROJECT)
+
+    assert request["project"] == "metadata-project"
+    assert request["public_summary"]["project"] == "metadata-project"
+    assert CONVERSATION_ID not in json.dumps(request["public_summary"], sort_keys=True)
+    assert str(metadata_root) not in json.dumps(request["public_summary"], sort_keys=True)
+
+
+def test_antigravity_project_derived_from_root_summary_store(tmp_path, monkeypatch):
+    transcript = tmp_path / "transcript.jsonl"
+    transcript.write_text("{}\n", encoding="utf-8")
+    metadata_root = tmp_path / "antigravity"
+    _write_antigravity_summary_store(
+        metadata_root,
+        [(CONVERSATION_ID, ["/Users/ddalkak/Projects/root-metadata-project"])],
+        nested=False,
+    )
+    monkeypatch.setenv("ANTIGRAVITY_HOME", str(metadata_root))
+    payload = _antigravity_stop_payload(str(transcript))
+    payload["workspacePaths"] = []
+
+    request = normalize_provider_capture_request("antigravity", payload, project=PROJECT)
+
+    assert request["project"] == "root-metadata-project"
+
+
+def test_antigravity_root_summary_store_avoids_nested_scan_on_metadata_miss(tmp_path, monkeypatch):
+    transcript = tmp_path / "transcript.jsonl"
+    transcript.write_text("{}\n", encoding="utf-8")
+    metadata_root = tmp_path / "antigravity"
+    _write_antigravity_summary_store(
+        metadata_root,
+        [("other-conversation-id", ["/Users/ddalkak/Projects/other-project"])],
+        nested=False,
+    )
+    _write_antigravity_summary_store(
+        metadata_root,
+        [(CONVERSATION_ID, ["/Users/ddalkak/Projects/nested-project"])],
+        nested=True,
+    )
+    monkeypatch.setenv("ANTIGRAVITY_HOME", str(metadata_root))
+    calls = []
+    real_connect = transcript_capture.sqlite3.connect
+
+    def tracking_connect(database, *args, **kwargs):
+        calls.append(str(database))
+        return real_connect(database, *args, **kwargs)
+
+    monkeypatch.setattr(transcript_capture.sqlite3, "connect", tracking_connect)
+    payload = _antigravity_stop_payload(str(transcript))
+    payload["workspacePaths"] = []
+
+    request = normalize_provider_capture_request("antigravity", payload, project=PROJECT)
+
+    expected = "unknown-" + hashlib.sha256(
+        f"antigravity:{CONVERSATION_ID}".encode("utf-8")
+    ).hexdigest()[:8] + "(session)"
+    assert request["project"] == expected
+    assert len(calls) == 1
+
+
+def test_antigravity_payload_workspace_precedes_conversation_metadata(tmp_path, monkeypatch):
+    transcript = tmp_path / "transcript.jsonl"
+    transcript.write_text("{}\n", encoding="utf-8")
+    metadata_root = tmp_path / "antigravity"
+    _write_antigravity_summary_store(
+        metadata_root,
+        [(CONVERSATION_ID, ["/Users/ddalkak/Projects/metadata-project"])],
+    )
+    monkeypatch.setenv("ANTIGRAVITY_HOME", str(metadata_root))
+    payload = _antigravity_stop_payload(str(transcript))
+    payload["workspacePaths"] = ["/Users/ddalkak/Projects/payload-project"]
+
+    request = normalize_provider_capture_request("antigravity", payload, project=PROJECT)
+
+    assert request["project"] == "payload-project"
+
+
+def test_antigravity_project_uses_session_fallback_without_workspace_metadata(tmp_path, monkeypatch):
+    transcript = tmp_path / "transcript.jsonl"
+    transcript.write_text("{}\n", encoding="utf-8")
+    monkeypatch.setenv("ANTIGRAVITY_HOME", str(tmp_path / "missing-antigravity"))
+    payload = _antigravity_stop_payload(str(transcript))
+    payload["workspacePaths"] = []
+
+    request = normalize_provider_capture_request("antigravity", payload, project=PROJECT)
+
+    expected = "unknown-" + hashlib.sha256(
+        f"antigravity:{CONVERSATION_ID}".encode("utf-8")
+    ).hexdigest()[:8] + "(session)"
+    assert request["project"] == expected
+    assert request["project"] != PROJECT
+    assert CONVERSATION_ID not in request["project"]
+    assert CONVERSATION_ID not in json.dumps(request["public_summary"], sort_keys=True)
+
+
+def test_antigravity_metadata_store_is_opened_read_only_and_immutable(tmp_path, monkeypatch):
+    transcript = tmp_path / "transcript.jsonl"
+    transcript.write_text("{}\n", encoding="utf-8")
+    metadata_root = tmp_path / "antigravity"
+    _write_antigravity_summary_store(
+        metadata_root,
+        [(CONVERSATION_ID, ["/Users/ddalkak/Projects/metadata-project"])],
+    )
+    monkeypatch.setenv("ANTIGRAVITY_HOME", str(metadata_root))
+    calls = []
+    real_connect = transcript_capture.sqlite3.connect
+
+    def tracking_connect(database, *args, **kwargs):
+        calls.append((str(database), kwargs.get("uri")))
+        return real_connect(database, *args, **kwargs)
+
+    monkeypatch.setattr(transcript_capture.sqlite3, "connect", tracking_connect)
+    payload = _antigravity_stop_payload(str(transcript))
+    payload["workspacePaths"] = []
+
+    request = normalize_provider_capture_request("antigravity", payload, project=PROJECT)
+
+    assert request["project"] == "metadata-project"
+    assert any("mode=ro&immutable=1" in database and uri is True for database, uri in calls)
+
+
 def test_project_derived_from_scalar_workspace_path_before_fallback(tmp_path):
     transcript = tmp_path / "transcript.jsonl"
     transcript.write_text("{}\n", encoding="utf-8")
@@ -332,11 +487,12 @@ def test_project_derived_from_cli_worktree_path_uses_repo_slug(tmp_path):
     assert request["public_summary"]["project"] == "my-cli-project"
 
 
-def test_project_falls_back_to_arg_without_workspace_path(tmp_path):
+def test_project_falls_back_to_arg_without_workspace_path_when_session_id_missing(tmp_path):
     transcript = tmp_path / "transcript.jsonl"
     transcript.write_text("{}\n", encoding="utf-8")
     payload = _antigravity_stop_payload(str(transcript))
     payload.pop("workspacePaths", None)
+    payload.pop("conversationId", None)
 
     request = normalize_provider_capture_request("antigravity", payload, project=PROJECT)
 
