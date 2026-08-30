@@ -39,7 +39,11 @@ def _antigravity_stop_payload(transcript_path: str) -> dict:
 
 
 def _write_antigravity_summary_store(root, rows, *, nested=True):
-    store = root / "conversations" / "summary.db" if nested else root / "summary.db"
+    store = (
+        root / "conversations" / "conversation_summaries.db"
+        if nested
+        else root / "conversation_summaries.db"
+    )
     store.parent.mkdir(parents=True)
     with sqlite3.connect(store) as connection:
         connection.execute(
@@ -296,6 +300,41 @@ def test_antigravity_project_derived_from_root_summary_store(tmp_path, monkeypat
     request = normalize_provider_capture_request("antigravity", payload, project=PROJECT)
 
     assert request["project"] == "root-metadata-project"
+
+
+def test_antigravity_root_summary_store_avoids_nested_scan_on_metadata_miss(tmp_path, monkeypatch):
+    transcript = tmp_path / "transcript.jsonl"
+    transcript.write_text("{}\n", encoding="utf-8")
+    metadata_root = tmp_path / "antigravity"
+    _write_antigravity_summary_store(
+        metadata_root,
+        [("other-conversation-id", ["/Users/ddalkak/Projects/other-project"])],
+        nested=False,
+    )
+    _write_antigravity_summary_store(
+        metadata_root,
+        [(CONVERSATION_ID, ["/Users/ddalkak/Projects/nested-project"])],
+        nested=True,
+    )
+    monkeypatch.setenv("ANTIGRAVITY_HOME", str(metadata_root))
+    calls = []
+    real_connect = transcript_capture.sqlite3.connect
+
+    def tracking_connect(database, *args, **kwargs):
+        calls.append(str(database))
+        return real_connect(database, *args, **kwargs)
+
+    monkeypatch.setattr(transcript_capture.sqlite3, "connect", tracking_connect)
+    payload = _antigravity_stop_payload(str(transcript))
+    payload["workspacePaths"] = []
+
+    request = normalize_provider_capture_request("antigravity", payload, project=PROJECT)
+
+    expected = "unknown-" + hashlib.sha256(
+        f"antigravity:{CONVERSATION_ID}".encode("utf-8")
+    ).hexdigest()[:8] + "(session)"
+    assert request["project"] == expected
+    assert len(calls) == 1
 
 
 def test_antigravity_payload_workspace_precedes_conversation_metadata(tmp_path, monkeypatch):
