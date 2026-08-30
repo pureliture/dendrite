@@ -4,9 +4,11 @@ import hashlib
 import json
 import os
 import re
+import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 from time import time
+from urllib.parse import unquote, urlparse
 
 from .hermes_profiles import (
     DEFAULT_HERMES_PROFILE,
@@ -38,6 +40,10 @@ CODEX_SESSION_ID_PATTERN = SESSION_ID_PATTERN  # backward-compatible alias
 HERMES_DEFAULT_STATE_DB = ".hermes/state.db"
 HERMES_LOCATOR_KEYS = ("hermes_db_path", "state_db_path", "session_db_path")
 HERMES_PROFILE_KEYS = ("hermes_profile", "profile", "profile_name")
+ANTIGRAVITY_HOME_ENV = "ANTIGRAVITY_HOME"
+ANTIGRAVITY_DEFAULT_HOME = ".gemini/antigravity-cli"
+ANTIGRAVITY_CONVERSATIONS_DIR = "conversations"
+ANTIGRAVITY_SUMMARY_TABLE = "conversation_summaries"
 PROJECT_SOURCE_PATH_KEYS = (
     "workspacePath",
     "workspace_path",
@@ -177,7 +183,7 @@ def has_workspace_path(payload: dict) -> bool:
     return bool(_first_workspace_path(payload))
 
 
-def _resolve_project(payload: dict, fallback: str) -> str:
+def _resolve_project(payload: dict, fallback: str, *, provider: str = "") -> str:
     """Label the capture by the session's own workspace directory.
 
     CLI surfaces (e.g. Antigravity `agy`) run in arbitrary directories but share a
@@ -189,6 +195,13 @@ def _resolve_project(payload: dict, fallback: str) -> str:
     first = _first_workspace_path(payload)
     if first:
         return canonicalize_project(first)
+    if provider == "antigravity":
+        conversation_id = _provider_session_id(provider, payload)
+        metadata_workspace = _resolve_antigravity_workspace(conversation_id)
+        if metadata_workspace:
+            return canonicalize_project(metadata_workspace)
+        if conversation_id:
+            return _antigravity_session_project_fallback(conversation_id)
     return canonicalize_project(fallback)
 
 
@@ -199,8 +212,8 @@ def normalize_provider_capture_request(provider: str, payload: dict, *, project:
     if raw_fields:
         raise ValueError(f"transcript content fields are not allowed in hook payload: {', '.join(raw_fields)}")
 
-    project = _resolve_project(payload, project)
     session_id = str(payload.get("session_id") or _provider_session_id(provider, payload))
+    project = _resolve_project(payload, project, provider=provider)
     locator = _extract_source_locator(provider, payload)
     hermes_profile = hermes_profile_from_payload(payload, locator=locator) if provider == "hermes" else ""
     agent_id = hermes_agent_id(hermes_profile) if provider == "hermes" else f"{provider}-transcript-capture"
@@ -347,6 +360,103 @@ def _provider_session_id(provider: str, payload: dict) -> str:
     if provider == "grok":
         return _grok_session_id(payload)
     return ""
+
+
+def _resolve_antigravity_workspace(conversation_id: str) -> str:
+    """Resolve an Antigravity conversation's workspace without exposing metadata.
+
+    The conversation summary store is opened read-only and immutable. A missing,
+    malformed, or unreadable store is intentionally indistinguishable from a
+    metadata miss so capture can use its session fallback without logging private
+    paths or database errors.
+    """
+    if not conversation_id:
+        return ""
+    for store_path in _antigravity_summary_stores():
+        try:
+            connection = sqlite3.connect(_antigravity_ro_uri(store_path), uri=True)
+        except sqlite3.Error:
+            continue
+        try:
+            row = connection.execute(
+                f"SELECT workspace_uris FROM {ANTIGRAVITY_SUMMARY_TABLE} "
+                "WHERE conversation_id = ? LIMIT 1",
+                (conversation_id,),
+            ).fetchone()
+        except sqlite3.Error:
+            row = None
+        finally:
+            connection.close()
+        if not row:
+            continue
+        for candidate in _iter_antigravity_workspace_values(row[0]):
+            workspace = _workspace_uri_to_path(candidate)
+            usable = _usable_project_source_path(workspace)
+            if usable:
+                return usable
+    return ""
+
+
+def _antigravity_summary_stores():
+    home = Path(os.environ.get(ANTIGRAVITY_HOME_ENV) or (Path.home() / ANTIGRAVITY_DEFAULT_HOME)).expanduser()
+    try:
+        stores = [path for path in home.glob("*.db") if path.is_file() and not path.is_symlink()]
+        conversations = home / ANTIGRAVITY_CONVERSATIONS_DIR
+        if conversations.is_dir():
+            stores.extend(
+                path
+                for path in conversations.rglob("*.db")
+                if path.is_file() and not path.is_symlink()
+            )
+        return tuple(sorted(set(stores)))
+    except OSError:
+        return ()
+
+
+def _antigravity_ro_uri(path: Path) -> str:
+    return f"file:{path}?mode=ro&immutable=1"
+
+
+def _iter_antigravity_workspace_values(value):
+    if isinstance(value, bytes):
+        value = value.decode("utf-8", errors="replace")
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return
+        try:
+            value = json.loads(text)
+        except (TypeError, ValueError):
+            yield text
+            return
+    if isinstance(value, str):
+        yield value
+    elif isinstance(value, list):
+        for item in value:
+            yield from _iter_antigravity_workspace_values(item)
+    elif isinstance(value, dict):
+        for key in ("workspace_uris", "workspaceUris", "uris", "paths", "path"):
+            if key in value:
+                yield from _iter_antigravity_workspace_values(value[key])
+
+
+def _workspace_uri_to_path(value: str) -> str:
+    if not isinstance(value, str):
+        return ""
+    candidate = value.strip()
+    if not candidate:
+        return ""
+    parsed = urlparse(candidate)
+    if not parsed.scheme:
+        return candidate
+    if parsed.scheme != "file" or parsed.netloc not in {"", "localhost"}:
+        return ""
+    return unquote(parsed.path)
+
+
+def _antigravity_session_project_fallback(conversation_id: str) -> str:
+    digest = hashlib.sha256(f"antigravity:{conversation_id}".encode("utf-8")).hexdigest()[:8]
+    return f"unknown-{digest}(session)"
 
 
 def _grok_session_id(payload: dict) -> str:
