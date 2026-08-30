@@ -48,13 +48,32 @@ def _write_antigravity_summary_store(root, rows, *, nested=True):
     with sqlite3.connect(store) as connection:
         connection.execute(
             "CREATE TABLE conversation_summaries "
-            "(conversation_id TEXT, workspace_uris TEXT)"
+            "(conversation_id TEXT, project_id TEXT, workspace_uris TEXT)"
         )
+        normalized_rows = []
+        for row in rows:
+            if len(row) == 3:
+                conversation_id, project_id, workspaces = row
+            else:
+                conversation_id, workspaces = row
+                project_id = ""
+            normalized_rows.append((conversation_id, project_id, workspaces))
         connection.executemany(
-            "INSERT INTO conversation_summaries (conversation_id, workspace_uris) VALUES (?, ?)",
-            [(conversation_id, json.dumps(workspaces)) for conversation_id, workspaces in rows],
+            "INSERT INTO conversation_summaries (conversation_id, project_id, workspace_uris) VALUES (?, ?, ?)",
+            [
+                (conversation_id, project_id, json.dumps(workspaces))
+                for conversation_id, project_id, workspaces in normalized_rows
+            ],
         )
     return store
+
+
+def _write_antigravity_project_definition(home, project_id, definition):
+    projects = home / ".gemini" / "config" / "projects"
+    projects.mkdir(parents=True)
+    definition_path = projects / f"{project_id}.json"
+    definition_path.write_text(json.dumps(definition), encoding="utf-8")
+    return definition_path
 
 
 def test_antigravity_stop_payload_extracts_transcript_path_locator(tmp_path):
@@ -300,6 +319,130 @@ def test_antigravity_project_derived_from_root_summary_store(tmp_path, monkeypat
     request = normalize_provider_capture_request("antigravity", payload, project=PROJECT)
 
     assert request["project"] == "root-metadata-project"
+
+
+def _antigravity_headless_payload(transcript_path: str) -> dict:
+    payload = _antigravity_stop_payload(transcript_path)
+    payload["workspacePaths"] = []
+    return payload
+
+
+@pytest.mark.parametrize(
+    ("resource", "expected_project"),
+    [
+        (
+            {
+                "gitFolder": {"folderUri": "file:///Users/ddalkak/Projects/git-folder-project"},
+                "folderUri": "file:///Users/ddalkak/Projects/direct-folder-project",
+                "name": "resource-project-name",
+            },
+            "git-folder-project",
+        ),
+        (
+            {"folderUri": "file:///Users/ddalkak/Projects/direct-folder-project", "name": "resource-project-name"},
+            "direct-folder-project",
+        ),
+        ({"name": "resource-project-name"}, "resource-project-name"),
+    ],
+)
+def test_antigravity_project_id_uses_project_definition_candidates(
+    tmp_path, monkeypatch, resource, expected_project
+):
+    transcript = tmp_path / "transcript.jsonl"
+    transcript.write_text("{}\n", encoding="utf-8")
+    metadata_root = tmp_path / "antigravity"
+    project_id = "project-id-fields"
+    _write_antigravity_summary_store(
+        metadata_root,
+        [(CONVERSATION_ID, project_id, ["/Users/ddalkak/Projects/workspace-project"])],
+    )
+    config_home = tmp_path / "home"
+    _write_antigravity_project_definition(
+        config_home,
+        project_id,
+        {
+            "id": project_id,
+            "name": "top-level-project-name",
+            "projectResources": {"resources": [resource]},
+        },
+    )
+    monkeypatch.setenv("ANTIGRAVITY_HOME", str(metadata_root))
+    monkeypatch.setattr(transcript_capture.Path, "home", staticmethod(lambda: config_home))
+
+    request = normalize_provider_capture_request(
+        "antigravity", _antigravity_headless_payload(str(transcript)), project=PROJECT
+    )
+
+    assert request["project"] == expected_project
+    assert project_id not in json.dumps(request["public_summary"], sort_keys=True)
+
+
+def test_antigravity_project_id_uses_top_level_name_when_resources_are_empty(tmp_path, monkeypatch):
+    transcript = tmp_path / "transcript.jsonl"
+    transcript.write_text("{}\n", encoding="utf-8")
+    metadata_root = tmp_path / "antigravity"
+    project_id = "default-cli-project"
+    _write_antigravity_summary_store(metadata_root, [(CONVERSATION_ID, project_id, [])])
+    config_home = tmp_path / "home"
+    _write_antigravity_project_definition(
+        config_home,
+        project_id,
+        {"id": project_id, "name": "CLI Project", "projectResources": {"resources": []}},
+    )
+    monkeypatch.setenv("ANTIGRAVITY_HOME", str(metadata_root))
+    monkeypatch.setattr(transcript_capture.Path, "home", staticmethod(lambda: config_home))
+
+    request = normalize_provider_capture_request(
+        "antigravity", _antigravity_headless_payload(str(transcript)), project=PROJECT
+    )
+
+    assert request["project"] == "CLI Project"
+    assert request["public_summary"]["project"] == "CLI Project"
+
+
+def test_antigravity_project_id_miss_falls_back_to_workspace_uris(tmp_path, monkeypatch):
+    transcript = tmp_path / "transcript.jsonl"
+    transcript.write_text("{}\n", encoding="utf-8")
+    metadata_root = tmp_path / "antigravity"
+    project_id = "missing-project-definition"
+    _write_antigravity_summary_store(
+        metadata_root,
+        [(CONVERSATION_ID, project_id, ["file:///Users/ddalkak/Projects/workspace-fallback-project"])],
+    )
+    monkeypatch.setenv("ANTIGRAVITY_HOME", str(metadata_root))
+    monkeypatch.setattr(transcript_capture.Path, "home", staticmethod(lambda: tmp_path / "home"))
+
+    request = normalize_provider_capture_request(
+        "antigravity", _antigravity_headless_payload(str(transcript)), project=PROJECT
+    )
+
+    assert request["project"] == "workspace-fallback-project"
+    assert project_id not in json.dumps(request["public_summary"], sort_keys=True)
+
+
+def test_antigravity_project_id_symlink_definition_falls_back_to_workspace_uris(tmp_path, monkeypatch):
+    transcript = tmp_path / "transcript.jsonl"
+    transcript.write_text("{}\n", encoding="utf-8")
+    metadata_root = tmp_path / "antigravity"
+    project_id = "symlink-project-definition"
+    _write_antigravity_summary_store(
+        metadata_root,
+        [(CONVERSATION_ID, project_id, ["file:///Users/ddalkak/Projects/symlink-fallback-project"])],
+    )
+    config_home = tmp_path / "home"
+    projects = config_home / ".gemini" / "config" / "projects"
+    projects.mkdir(parents=True)
+    target = tmp_path / "outside-project-definition.json"
+    target.write_text(json.dumps({"name": "should-not-be-read"}), encoding="utf-8")
+    (projects / f"{project_id}.json").symlink_to(target)
+    monkeypatch.setenv("ANTIGRAVITY_HOME", str(metadata_root))
+    monkeypatch.setattr(transcript_capture.Path, "home", staticmethod(lambda: config_home))
+
+    request = normalize_provider_capture_request(
+        "antigravity", _antigravity_headless_payload(str(transcript)), project=PROJECT
+    )
+
+    assert request["project"] == "symlink-fallback-project"
 
 
 def test_antigravity_root_summary_store_avoids_nested_scan_on_metadata_miss(tmp_path, monkeypatch):

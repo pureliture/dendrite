@@ -42,6 +42,8 @@ HERMES_LOCATOR_KEYS = ("hermes_db_path", "state_db_path", "session_db_path")
 HERMES_PROFILE_KEYS = ("hermes_profile", "profile", "profile_name")
 ANTIGRAVITY_HOME_ENV = "ANTIGRAVITY_HOME"
 ANTIGRAVITY_DEFAULT_HOME = ".gemini/antigravity-cli"
+ANTIGRAVITY_DEFAULT_CONFIG_HOME = ".gemini/config"
+ANTIGRAVITY_PROJECTS_DIR = "projects"
 ANTIGRAVITY_CONVERSATIONS_DIR = "conversations"
 ANTIGRAVITY_SUMMARY_STORE_NAME = "conversation_summaries.db"
 ANTIGRAVITY_SUMMARY_TABLE = "conversation_summaries"
@@ -198,9 +200,9 @@ def _resolve_project(payload: dict, fallback: str, *, provider: str = "") -> str
         return canonicalize_project(first)
     if provider == "antigravity":
         conversation_id = _provider_session_id(provider, payload)
-        metadata_workspace = _resolve_antigravity_workspace(conversation_id)
-        if metadata_workspace:
-            return canonicalize_project(metadata_workspace)
+        metadata_project = _resolve_antigravity_project(conversation_id)
+        if metadata_project:
+            return canonicalize_project(metadata_project)
         if conversation_id:
             return _antigravity_session_project_fallback(conversation_id)
     return canonicalize_project(fallback)
@@ -363,6 +365,23 @@ def _provider_session_id(provider: str, payload: dict) -> str:
     return ""
 
 
+def _resolve_antigravity_project(conversation_id: str) -> str:
+    """Resolve an Antigravity conversation's project without exposing metadata.
+
+    The project definition keyed by ``project_id`` is preferred to the summary
+    row's workspace URI. A usable payload workspace is handled by
+    :func:`_resolve_project` before this metadata lookup.
+    """
+    for project_id, workspace_uris in _iter_antigravity_summary_rows(conversation_id):
+        project = _resolve_antigravity_project_definition(project_id)
+        if project:
+            return project
+        workspace = _resolve_antigravity_workspace_values(workspace_uris)
+        if workspace:
+            return workspace
+    return ""
+
+
 def _resolve_antigravity_workspace(conversation_id: str) -> str:
     """Resolve an Antigravity conversation's workspace without exposing metadata.
 
@@ -373,6 +392,17 @@ def _resolve_antigravity_workspace(conversation_id: str) -> str:
     """
     if not conversation_id:
         return ""
+    for _project_id, workspace_uris in _iter_antigravity_summary_rows(conversation_id):
+        workspace = _resolve_antigravity_workspace_values(workspace_uris)
+        if workspace:
+            return workspace
+    return ""
+
+
+def _iter_antigravity_summary_rows(conversation_id: str):
+    """Yield ``(project_id, workspace_uris)`` rows from bounded summary stores."""
+    if not conversation_id:
+        return
     for store_path in _antigravity_summary_stores():
         try:
             connection = sqlite3.connect(_antigravity_ro_uri(store_path), uri=True)
@@ -380,22 +410,78 @@ def _resolve_antigravity_workspace(conversation_id: str) -> str:
             continue
         try:
             row = connection.execute(
-                f"SELECT workspace_uris FROM {ANTIGRAVITY_SUMMARY_TABLE} "
+                f"SELECT project_id, workspace_uris FROM {ANTIGRAVITY_SUMMARY_TABLE} "
                 "WHERE conversation_id = ? LIMIT 1",
                 (conversation_id,),
             ).fetchone()
         except sqlite3.Error:
-            row = None
+            try:
+                # Keep PR #8's workspace-only schema readable for older local stores.
+                legacy_row = connection.execute(
+                    f"SELECT workspace_uris FROM {ANTIGRAVITY_SUMMARY_TABLE} "
+                    "WHERE conversation_id = ? LIMIT 1",
+                    (conversation_id,),
+                ).fetchone()
+            except sqlite3.Error:
+                legacy_row = None
+            row = ("", legacy_row[0]) if legacy_row else None
         finally:
             connection.close()
         if not row:
             continue
-        for candidate in _iter_antigravity_workspace_values(row[0]):
-            workspace = _workspace_uri_to_path(candidate)
-            usable = _usable_project_source_path(workspace)
-            if usable:
-                return usable
+        yield str(row[0] or ""), row[1]
+
+
+def _resolve_antigravity_workspace_values(value) -> str:
+    for candidate in _iter_antigravity_workspace_values(value):
+        workspace = _workspace_uri_to_path(candidate)
+        usable = _usable_project_source_path(workspace)
+        if usable:
+            return usable
     return ""
+
+
+def _resolve_antigravity_project_definition(project_id: str) -> str:
+    """Resolve one Antigravity project definition using a no-write bounded read."""
+    project_id = str(project_id or "").strip()
+    if not project_id or any(separator in project_id for separator in ("/", "\\", "\x00")):
+        return ""
+
+    projects = Path.home() / ANTIGRAVITY_DEFAULT_CONFIG_HOME / ANTIGRAVITY_PROJECTS_DIR
+    if not projects.is_dir() or projects.is_symlink():
+        return ""
+    definition_path = projects / f"{project_id}.json"
+    if not definition_path.is_file() or definition_path.is_symlink():
+        return ""
+    try:
+        with definition_path.open("r", encoding="utf-8") as stream:
+            definition = json.load(stream)
+    except (OSError, TypeError, ValueError):
+        return ""
+
+    for candidate in _iter_antigravity_project_definition_values(definition):
+        workspace = _workspace_uri_to_path(candidate)
+        usable = _usable_project_source_path(workspace)
+        if usable:
+            return usable
+    return ""
+
+
+def _iter_antigravity_project_definition_values(definition):
+    if not isinstance(definition, dict):
+        return
+    project_resources = definition.get("projectResources")
+    resources = project_resources.get("resources") if isinstance(project_resources, dict) else None
+    if isinstance(resources, list) and resources:
+        resource = resources[0]
+        if isinstance(resource, dict):
+            git_folder = resource.get("gitFolder")
+            if isinstance(git_folder, dict):
+                yield git_folder.get("folderUri")
+            yield resource.get("folderUri")
+            yield resource.get("name")
+    # Headless/default projects can carry only the top-level name.
+    yield definition.get("name")
 
 
 def _antigravity_summary_stores():
