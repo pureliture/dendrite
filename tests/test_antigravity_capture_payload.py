@@ -32,7 +32,7 @@ def _antigravity_stop_payload(transcript_path: str) -> dict:
         "error": "",
         "fullyIdle": True,
         "conversationId": CONVERSATION_ID,
-        "workspacePaths": ["/Users/ddalkak/Projects/dendrite"],
+        "workspacePaths": ["/Users/example/Projects/dendrite"],
         "transcriptPath": transcript_path,
         "artifactDirectoryPath": "/tmp/antigravity-artifacts",
     }
@@ -275,7 +275,7 @@ def test_project_derived_from_cli_workspace_path(tmp_path):
     transcript = tmp_path / "transcript.jsonl"
     transcript.write_text("{}\n", encoding="utf-8")
     payload = _antigravity_stop_payload(str(transcript))
-    payload["workspacePaths"] = ["/Users/ddalkak/Projects/my-cli-project"]
+    payload["workspacePaths"] = ["/Users/example/Projects/my-cli-project"]
 
     request = normalize_provider_capture_request("antigravity", payload, project=PROJECT)
 
@@ -289,7 +289,7 @@ def test_antigravity_project_derived_from_conversation_metadata(tmp_path, monkey
     metadata_root = tmp_path / "antigravity"
     _write_antigravity_summary_store(
         metadata_root,
-        [(CONVERSATION_ID, ["file:///Users/ddalkak/Projects/metadata-project"])],
+        [(CONVERSATION_ID, ["file:///Users/example/Projects/metadata-project"])],
     )
     monkeypatch.setenv("ANTIGRAVITY_HOME", str(metadata_root))
     payload = _antigravity_stop_payload(str(transcript))
@@ -309,7 +309,7 @@ def test_antigravity_project_derived_from_root_summary_store(tmp_path, monkeypat
     metadata_root = tmp_path / "antigravity"
     _write_antigravity_summary_store(
         metadata_root,
-        [(CONVERSATION_ID, ["/Users/ddalkak/Projects/root-metadata-project"])],
+        [(CONVERSATION_ID, ["/Users/example/Projects/root-metadata-project"])],
         nested=False,
     )
     monkeypatch.setenv("ANTIGRAVITY_HOME", str(metadata_root))
@@ -332,14 +332,14 @@ def _antigravity_headless_payload(transcript_path: str) -> dict:
     [
         (
             {
-                "gitFolder": {"folderUri": "file:///Users/ddalkak/Projects/git-folder-project"},
-                "folderUri": "file:///Users/ddalkak/Projects/direct-folder-project",
+                "gitFolder": {"folderUri": "file:///Users/example/Projects/git-folder-project"},
+                "folderUri": "file:///Users/example/Projects/direct-folder-project",
                 "name": "resource-project-name",
             },
             "git-folder-project",
         ),
         (
-            {"folderUri": "file:///Users/ddalkak/Projects/direct-folder-project", "name": "resource-project-name"},
+            {"folderUri": "file:///Users/example/Projects/direct-folder-project", "name": "resource-project-name"},
             "direct-folder-project",
         ),
         ({"name": "resource-project-name"}, "resource-project-name"),
@@ -354,7 +354,7 @@ def test_antigravity_project_id_uses_project_definition_candidates(
     project_id = "project-id-fields"
     _write_antigravity_summary_store(
         metadata_root,
-        [(CONVERSATION_ID, project_id, ["/Users/ddalkak/Projects/workspace-project"])],
+        [(CONVERSATION_ID, project_id, ["/Users/example/Projects/workspace-project"])],
     )
     config_home = tmp_path / "home"
     _write_antigravity_project_definition(
@@ -407,7 +407,7 @@ def test_antigravity_project_id_miss_falls_back_to_workspace_uris(tmp_path, monk
     project_id = "missing-project-definition"
     _write_antigravity_summary_store(
         metadata_root,
-        [(CONVERSATION_ID, project_id, ["file:///Users/ddalkak/Projects/workspace-fallback-project"])],
+        [(CONVERSATION_ID, project_id, ["file:///Users/example/Projects/workspace-fallback-project"])],
     )
     monkeypatch.setenv("ANTIGRAVITY_HOME", str(metadata_root))
     monkeypatch.setattr(transcript_capture.Path, "home", staticmethod(lambda: tmp_path / "home"))
@@ -427,7 +427,7 @@ def test_antigravity_project_id_symlink_definition_falls_back_to_workspace_uris(
     project_id = "symlink-project-definition"
     _write_antigravity_summary_store(
         metadata_root,
-        [(CONVERSATION_ID, project_id, ["file:///Users/ddalkak/Projects/symlink-fallback-project"])],
+        [(CONVERSATION_ID, project_id, ["file:///Users/example/Projects/symlink-fallback-project"])],
     )
     config_home = tmp_path / "home"
     projects = config_home / ".gemini" / "config" / "projects"
@@ -451,12 +451,12 @@ def test_antigravity_root_summary_store_avoids_nested_scan_on_metadata_miss(tmp_
     metadata_root = tmp_path / "antigravity"
     _write_antigravity_summary_store(
         metadata_root,
-        [("other-conversation-id", ["/Users/ddalkak/Projects/other-project"])],
+        [("other-conversation-id", ["/Users/example/Projects/other-project"])],
         nested=False,
     )
     _write_antigravity_summary_store(
         metadata_root,
-        [(CONVERSATION_ID, ["/Users/ddalkak/Projects/nested-project"])],
+        [(CONVERSATION_ID, ["/Users/example/Projects/nested-project"])],
         nested=True,
     )
     monkeypatch.setenv("ANTIGRAVITY_HOME", str(metadata_root))
@@ -486,11 +486,11 @@ def test_antigravity_payload_workspace_precedes_conversation_metadata(tmp_path, 
     metadata_root = tmp_path / "antigravity"
     _write_antigravity_summary_store(
         metadata_root,
-        [(CONVERSATION_ID, ["/Users/ddalkak/Projects/metadata-project"])],
+        [(CONVERSATION_ID, ["/Users/example/Projects/metadata-project"])],
     )
     monkeypatch.setenv("ANTIGRAVITY_HOME", str(metadata_root))
     payload = _antigravity_stop_payload(str(transcript))
-    payload["workspacePaths"] = ["/Users/ddalkak/Projects/payload-project"]
+    payload["workspacePaths"] = ["/Users/example/Projects/payload-project"]
 
     request = normalize_provider_capture_request("antigravity", payload, project=PROJECT)
 
@@ -521,7 +521,7 @@ def test_antigravity_metadata_store_is_opened_read_only_and_immutable(tmp_path, 
     metadata_root = tmp_path / "antigravity"
     _write_antigravity_summary_store(
         metadata_root,
-        [(CONVERSATION_ID, ["/Users/ddalkak/Projects/metadata-project"])],
+        [(CONVERSATION_ID, ["/Users/example/Projects/metadata-project"])],
     )
     monkeypatch.setenv("ANTIGRAVITY_HOME", str(metadata_root))
     calls = []
@@ -546,7 +546,7 @@ def test_project_derived_from_scalar_workspace_path_before_fallback(tmp_path):
     transcript.write_text("{}\n", encoding="utf-8")
     payload = _antigravity_stop_payload(str(transcript))
     payload.pop("workspacePaths", None)
-    payload["workspacePath"] = "/Users/ddalkak/Projects/neurons"
+    payload["workspacePath"] = "/Users/example/Projects/neurons"
 
     request = normalize_provider_capture_request("codex", payload, project=PROJECT)
 
@@ -561,7 +561,7 @@ def test_codex_project_derived_from_cwd_before_hardcoded_fallback(tmp_path):
         "hook_event_name": "Stop",
         "session_id": "codex-session-123",
         "transcript_path": str(transcript),
-        "cwd": "/Users/ddalkak/Projects/neurons",
+        "cwd": "/Users/example/Projects/neurons",
     }
 
     request = normalize_provider_capture_request("codex", payload, project=PROJECT)
@@ -577,7 +577,7 @@ def test_codex_project_derived_from_worktree_cwd_uses_repo_slug(tmp_path):
         "hook_event_name": "Stop",
         "session_id": "codex-session-123",
         "transcript_path": str(transcript),
-        "currentWorkingDirectory": "/Users/ddalkak/Projects/neurons/.worktrees/transcript-capture-recovery",
+        "currentWorkingDirectory": "/Users/example/Projects/neurons/.worktrees/transcript-capture-recovery",
     }
 
     request = normalize_provider_capture_request("codex", payload, project=PROJECT)
@@ -593,7 +593,7 @@ def test_provider_storage_path_is_not_used_as_project_slug(tmp_path):
         "hook_event_name": "Stop",
         "session_id": "codex-session-123",
         "transcript_path": str(transcript),
-        "workspacePaths": ["/Users/ddalkak/.codex/sessions/2026/06/02"],
+        "workspacePaths": ["/Users/example/.codex/sessions/2026/06/02"],
     }
 
     request = normalize_provider_capture_request("codex", payload, project=PROJECT)
@@ -609,8 +609,8 @@ def test_provider_storage_path_does_not_override_valid_cwd(tmp_path):
         "hook_event_name": "Stop",
         "session_id": "codex-session-123",
         "transcript_path": str(transcript),
-        "workspacePaths": ["/Users/ddalkak/.gemini/antigravity-cli/brain/session/.system_generated/logs"],
-        "workingDirectory": "/Users/ddalkak/Projects/neurons",
+        "workspacePaths": ["/Users/example/.gemini/antigravity-cli/brain/session/.system_generated/logs"],
+        "workingDirectory": "/Users/example/Projects/neurons",
     }
 
     request = normalize_provider_capture_request("codex", payload, project=PROJECT)
@@ -622,7 +622,7 @@ def test_project_derived_from_cli_worktree_path_uses_repo_slug(tmp_path):
     transcript = tmp_path / "transcript.jsonl"
     transcript.write_text("{}\n", encoding="utf-8")
     payload = _antigravity_stop_payload(str(transcript))
-    payload["workspacePaths"] = ["/Users/ddalkak/Projects/my-cli-project/.claude-worktrees/session-a"]
+    payload["workspacePaths"] = ["/Users/example/Projects/my-cli-project/.claude-worktrees/session-a"]
 
     request = normalize_provider_capture_request("antigravity", payload, project=PROJECT)
 
@@ -674,8 +674,8 @@ def test_antigravity_capture_observed_at_preserves_explicit_value(tmp_path):
 
 def test_has_workspace_path_true_when_present():
     # Interactive agy Stop payloads carry the workspace; the global hook should capture.
-    assert has_workspace_path({"workspacePaths": ["/Users/ddalkak/Projects/foo"]}) is True
-    assert has_workspace_path({"cwd": "/Users/ddalkak/Projects/neurons"}) is True
+    assert has_workspace_path({"workspacePaths": ["/Users/example/Projects/foo"]}) is True
+    assert has_workspace_path({"cwd": "/Users/example/Projects/neurons"}) is True
 
 
 def test_has_workspace_path_false_when_empty_or_absent():
@@ -685,7 +685,7 @@ def test_has_workspace_path_false_when_empty_or_absent():
     assert has_workspace_path({}) is False
     assert has_workspace_path({"workspacePaths": [""]}) is False
     assert has_workspace_path({"workspacePaths": ["   "]}) is False
-    assert has_workspace_path({"workspacePaths": ["/Users/ddalkak/.codex/sessions/2026/06/02"]}) is False
+    assert has_workspace_path({"workspacePaths": ["/Users/example/.codex/sessions/2026/06/02"]}) is False
 
 
 def test_antigravity_legacy_normalizer_maps_stop_payload_to_session_end():

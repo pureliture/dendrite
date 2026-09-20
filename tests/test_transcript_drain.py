@@ -14,7 +14,7 @@ def _capture_request(source, *, project: str = "neurons") -> dict:
             "hook_event_name": "Stop",
             "session_id": "codex-session-123",
             "transcript_path": str(source),
-            "cwd": f"/Users/ddalkak/Projects/{project}",
+            "cwd": f"/Users/example/Projects/{project}",
         },
         project="dendrite",
     )

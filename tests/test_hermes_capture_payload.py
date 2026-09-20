@@ -33,7 +33,7 @@ HERMES_SESSION_ID = "hermes-sess-01HXAAAAAAAAAAAAAAAAAAAAAA"
 SESSION_CONTENT = "hello from hermes session alpha"
 OTHER_SESSION_ID = "hermes-sess-OTHERBBBBBBBBBBBBBBBBBBBBBB"
 OTHER_CONTENT = "this belongs to a different session beta"
-SECRET_PATH = "/Users/ddalkak/private/secret-token-path"
+SECRET_PATH = "/Users/example/private/secret-token-path"
 
 
 def _hermes_session_payload(state_db_path: str) -> dict:
@@ -42,7 +42,7 @@ def _hermes_session_payload(state_db_path: str) -> dict:
         "hook_event_name": "on_session_end",
         "session_id": HERMES_SESSION_ID,
         "transcript_path": state_db_path,
-        "workspacePaths": ["/Users/ddalkak/Projects/dendrite"],
+        "workspacePaths": ["/Users/example/Projects/dendrite"],
     }
 
 
@@ -215,7 +215,7 @@ def test_hermes_capture_resolves_default_db_from_hermes_home(tmp_path, monkeypat
     payload = {
         "hook_event_name": "on_session_end",
         "session_id": HERMES_SESSION_ID,
-        "workspacePaths": ["/Users/ddalkak/Projects/dendrite"],
+        "workspacePaths": ["/Users/example/Projects/dendrite"],
     }
 
     request = normalize_provider_capture_request("hermes", payload, project=PROJECT)
@@ -229,7 +229,7 @@ def test_hermes_capture_yields_no_source_when_db_absent(tmp_path, monkeypatch):
     payload = {
         "hook_event_name": "on_session_end",
         "session_id": HERMES_SESSION_ID,
-        "workspacePaths": ["/Users/ddalkak/Projects/dendrite"],
+        "workspacePaths": ["/Users/example/Projects/dendrite"],
     }
 
     request = normalize_provider_capture_request("hermes", payload, project=PROJECT)
@@ -370,7 +370,7 @@ def test_hermes_drain_refuses_when_session_id_missing_in_multisession_store(tmp_
         "hook_event_name": "on_session_end",
         # deliberately no session_id
         "transcript_path": str(db),
-        "workspacePaths": ["/Users/ddalkak/Projects/dendrite"],
+        "workspacePaths": ["/Users/example/Projects/dendrite"],
     }
     request = normalize_provider_capture_request("hermes", payload, project=PROJECT)
     assert request["session_id"] == ""
@@ -420,7 +420,7 @@ def test_non_hermes_drain_still_packs_redacted_body(tmp_path):
         "hook_event_name": "Stop",
         "session_id": "codex-session-123",
         "transcript_path": str(transcript),
-        "cwd": "/Users/ddalkak/Projects/neurons",
+        "cwd": "/Users/example/Projects/neurons",
     }
     request = normalize_provider_capture_request("codex", payload, project=PROJECT)
     spool = TranscriptCaptureSpool(tmp_path / "capture-spool")
@@ -483,11 +483,12 @@ def test_cli_transcript_capture_hermes_profile_resolves_named_store(tmp_path, mo
     metis_home.mkdir(parents=True)
     db = metis_home / "state.db"
     _write_hermes_state_db(db)
+    monkeypatch.delenv("HERMES_HOME", raising=False)
     monkeypatch.setenv("HOME", str(home))
     payload = {
         "hook_event_name": "on_session_end",
         "session_id": HERMES_SESSION_ID,
-        "workspacePaths": ["/Users/ddalkak/Projects/dendrite"],
+        "workspacePaths": ["/Users/example/Projects/dendrite"],
     }
     monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps(payload)))
 

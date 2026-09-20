@@ -9,7 +9,7 @@ from dendrite.redaction import redact_text
 
 
 def test_redaction_removes_secret_shapes_and_private_paths():
-    private_path = "/Users/ddalkak/.openclaw/" + "private/portfolio/positions.yaml"
+    private_path = "/Users/example/.open" + "claw/" + "private/portfolio/positions.yaml"
     text = "token=live-token-value path=" + private_path
 
     redacted = redact_text(text)
@@ -34,7 +34,7 @@ def test_minimizer_keeps_manual_note_bounded_and_redacted():
     raw = {
         "provider": "codex",
         "project": "dendrite",
-        "cwd": "/Users/ddalkak/Projects/dendrite",
+        "cwd": "/Users/example/Projects/dendrite",
         "session_id": "session-123",
         "event_type": "manual_note",
         "text": "Remember this. TOKEN=live-token-value",
