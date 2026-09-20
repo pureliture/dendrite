@@ -50,7 +50,7 @@ Hermes agent 세션이 `dendrite` 경계를 지키면서 안정적으로 `neuron
 
 다음은 이 `dendrite` 수정 요구사항의 직접 scope가 아니다.
 
-- Mac LaunchAgent `com.llmbrain.rag-ingress-queue-tunnel` 수정 또는 재시작.
+- Mac tunnel LaunchAgent 수정 또는 재시작.
 - stale ClusterIP tunnel 복구.
 - active drain LaunchAgent 생성/수정/재시작.
 - non-Hermes provider backlog 전체 drain.
