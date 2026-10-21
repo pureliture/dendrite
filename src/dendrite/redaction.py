@@ -50,6 +50,11 @@ LOWER_SECRET_ASSIGNMENT_RE = re.compile(
     r"\b(password|passwd|secret|token|api[_-]?key)\b\s*[:=]\s*(\"[^\"]*\"|'[^']*'|[^ \n\t,'\"}]+)",
     re.IGNORECASE,
 )
+SPACED_SECRET_VALUE_RE = re.compile(
+    r"\b(?:access[_-]?token|api[_-]?key|token|secret|password|passwd)\b"
+    r"""["':=\s]{1,4}[A-Za-z0-9._/+\-]{20,}""",
+    re.IGNORECASE,
+)
 
 
 def redact_text(text: str, *, private_path_patterns=None) -> str:
@@ -75,6 +80,7 @@ def redact_text_v2(text: str, *, private_path_patterns=None) -> str:
     redacted = BASIC_AUTH_RE.sub("Basic <redacted:secret>", redacted)
     redacted = SECRET_ASSIGNMENT_RE.sub("<redacted:secret>", redacted)
     redacted = LOWER_SECRET_ASSIGNMENT_RE.sub("<redacted:secret>", redacted)
+    redacted = SPACED_SECRET_VALUE_RE.sub("<redacted:secret>", redacted)
     return redacted
 
 
