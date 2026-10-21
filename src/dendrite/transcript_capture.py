@@ -739,6 +739,13 @@ class TranscriptCaptureSpool:
     def ack(self, processing_path: Path | str) -> Path:
         return self._spool.ack(processing_path)
 
+    def checkpoint_delivery(self, processing_path: Path | str, *, snapshot_hash: str, next_part: int) -> None:
+        """Persist only delivery progress here; redacted bodies live in the outbox."""
+        source = Path(processing_path)
+        request = json.loads(source.read_text(encoding="utf-8"))
+        request["delivery"] = {"snapshot_hash": snapshot_hash, "next_part": next_part}
+        self._spool.replace_json(source, request)
+
     def quarantine(self, processing_path: Path | str) -> Path:
         return self.quarantine_with_failure(processing_path)
 

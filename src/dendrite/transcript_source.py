@@ -2,8 +2,8 @@
 
 One interface, one adapter per provider storage shape. The thin shipper
 (`transcript_drain`) reads a capture request's local source through the matching
-adapter and gets back a single redacted transcript text, then packs it into the
-same `conversation_chunk` document for every provider.
+adapter and gets back the complete redacted transcript text. The drain splits
+it into bounded `conversation_chunk` documents without dropping the tail.
 
 - Text-file providers (codex/claude/gemini/antigravity/grok) store one jsonl file
   per session (Grok: ``updates.jsonl``): the adapter reads and redacts the file as
@@ -24,6 +24,7 @@ from pathlib import Path
 
 from .redaction import redact_public_ingress_text
 
+# Per-document serialized body budget; never a limit on the source transcript.
 MAX_TRANSCRIPT_BODY_CHARS = 180_000
 # Schema per Hermes session-storage docs; tolerant to column presence. Verify
 # against a live Hermes install before marking the contract source-verified.
@@ -61,7 +62,7 @@ class JsonlSourceAdapter(TranscriptSourceAdapter):
             text = path.read_text(encoding="utf-8", errors="replace")
         except OSError as exc:
             raise ValueError("source_unreadable") from exc
-        return _redact_and_bound(text)
+        return redact_public_ingress_text(text)
 
 
 class HermesSqliteSourceAdapter(TranscriptSourceAdapter):
@@ -72,7 +73,7 @@ class HermesSqliteSourceAdapter(TranscriptSourceAdapter):
         path = _source_path(locator.get("runtime_handle"))
         session_id = str(request.get("session_id") or "")
         text = _read_hermes_session_text(path, session_id)
-        return _redact_and_bound(text)
+        return redact_public_ingress_text(text)
 
 
 _DEFAULT_ADAPTER = JsonlSourceAdapter()
@@ -92,13 +93,6 @@ def _source_path(value) -> Path:
     if not path.exists() or not path.is_file():
         raise ValueError("source_unreadable")
     return path
-
-
-def _redact_and_bound(text: str) -> str:
-    redacted = redact_public_ingress_text(text)
-    if len(redacted) > MAX_TRANSCRIPT_BODY_CHARS:
-        return redacted[: MAX_TRANSCRIPT_BODY_CHARS - len("\n[truncated]\n")] + "\n[truncated]\n"
-    return redacted
 
 
 def enumerate_hermes_sessions(db_path) -> list[str]:

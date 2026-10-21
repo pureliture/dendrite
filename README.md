@@ -127,6 +127,10 @@ public/redacted enqueue payload만 wire에 올린다.
 `transcript-drain`이 spool을 **tick 단위 bounded**로 읽어
 ingress queue로 전달한다.<br/>
 한 번에 큐를 쏟지 않고, 백프레셔를 client 쪽에서 존중한다.
+긴 전사는 버리지 않고 여러 조각으로 보내며, `--max-items`는
+tick당 capture 처리 수와 ingress POST 시도 수를 모두 제한한다.
+모든 조각이 수락되기 전까지 capture는 pending에 남는다.
+[분할 전송과 재시도](docs/TRANSCRIPT_DELIVERY.md)
 
 </td>
 <td width="50%" valign="top">

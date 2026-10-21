@@ -82,7 +82,10 @@ def build_parser() -> ArgumentParser:
     drain.add_argument("--capture-spool", required=True)
     drain.add_argument("--ingress-url", required=True)
     drain.add_argument("--target-profile", default="ragflow-transcript-memory")
-    drain.add_argument("--max-items", type=int, default=5)
+    drain.add_argument(
+        "--max-items", type=int, default=5,
+        help="maximum capture requests and ingress POST attempts per tick",
+    )
     drain.add_argument("--timeout-seconds", type=float, default=10.0)
     drain.add_argument("--requeue-recoverable-quarantine", action="store_true")
     drain.add_argument("--runtime-dir", default="")
