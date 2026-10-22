@@ -46,7 +46,7 @@
 - Obsolete tests: 기존 Antigravity workspace 부재 테스트는 session id 부재 fallback을 검증하도록 갱신했으며 삭제한 테스트는 없다.
 - Review follow-up evidence: canonical root store가 존재하는 metadata miss에서 SQLite open이 1회로 제한되는 regression test를 추가했고, 기존 focused/full verification을 다시 수행한다.
 - Remaining gap: 실제 `agy --print` 종료 이벤트를 발생시키는 live hook smoke와 production ingress/runtime 검증은 수행하지 않았다.
-- Deferred: provider config/LaunchAgent mutation, Antigravity core 변경, `neurons` server/GC/RAGFlow 운영 작업은 승인 범위 밖으로 남겼다.
+- Deferred: provider config/LaunchAgent mutation, Antigravity core 변경, `neurons` server/GC/백엔드 운영 작업은 승인 범위 밖으로 남겼다.
 
 ## Next action
 

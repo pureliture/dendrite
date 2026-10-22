@@ -57,14 +57,14 @@ def build_parser() -> ArgumentParser:
     provider_subparsers.add_parser("doctor", help="print provider contract readiness")
     hook_plan = provider_subparsers.add_parser("hook-plan", help="print a non-mutating provider hook plan")
     hook_plan.add_argument(
-        "--provider", required=True, choices=["claude", "gemini", "codex", "antigravity", "hermes", "grok"]
+        "--provider", required=True, choices=["claude", "gemini", "codex", "antigravity", "hermes", "grok", "opencode"]
     )
     hook_plan.add_argument("--action", required=True, choices=["install", "uninstall"])
     hook_plan.add_argument("--project", default="<project>")
     hook_plan.add_argument("--capture-spool", default="<private-transcript-capture-spool>")
     capture = subparsers.add_parser("transcript-capture", help="enqueue a provider locator-only capture request")
     capture.add_argument(
-        "--provider", required=True, choices=["claude", "gemini", "codex", "antigravity", "hermes", "grok"]
+        "--provider", required=True, choices=["claude", "gemini", "codex", "antigravity", "hermes", "grok", "opencode"]
     )
     capture.add_argument("--project", required=True)
     capture.add_argument("--spool", required=True)
@@ -81,7 +81,7 @@ def build_parser() -> ArgumentParser:
     drain.add_argument("--once", action="store_true", help="run one bounded drain tick")
     drain.add_argument("--capture-spool", required=True)
     drain.add_argument("--ingress-url", required=True)
-    drain.add_argument("--target-profile", default="ragflow-transcript-memory")
+    drain.add_argument("--target-profile", default="index-transcript-memory")
     drain.add_argument(
         "--max-items", type=int, default=5,
         help="maximum capture requests and ingress POST attempts per tick",

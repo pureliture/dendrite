@@ -10,7 +10,7 @@ provider처럼 **capture는 locator-only**(store 경로만 기록)로 두고, **
 쓰고, codex/claude/gemini/antigravity는 기존 jsonl 텍스트 adapter를 쓴다.
 
 이 설계는 dendrite가 *이미* 하던 일("provider 로컬 소스를 읽어 redacted 대화 문서로
-전달")을 adapter로 일반화한 것이다. session-memory build/promote, GC, RAGFlow write 등
+전달")을 adapter로 일반화한 것이다. session-memory build/promote, GC, backend write 등
 server/brain 책임은 여전히 neurons 소유이며 dendrite는 추가하지 않는다.
 
 ## Requirements Reference
@@ -24,7 +24,7 @@ server/brain 책임은 여전히 neurons 소유이며 dendrite는 추가하지 �
   - Hermes adapter는 SQLite를 read-only/immutable로 열고(write/checkpoint 금지) 해당
     세션만 추출, redact 후 ship.
   - approved ingress(`POST /v1/ingest/enqueue`)만 사용. 기존 4개 provider 무회귀.
-  - server brain/session-memory build/GC/RAGFlow write 책임 미추가.
+  - server brain/session-memory build/GC/backend write 책임 미추가.
 
 ## Approach Proposal
 
@@ -219,4 +219,4 @@ code-changing work이므로 red→green→refactor. adapter 도입은 jsonl 동�
   않나"로 thin 경계 재검토. 서버가 Mac 로컬 DB를 못 읽는 구조적 이유 + 단일 인터페이스+adapter
   깔끔성 → **선택안 B(adapter) 채택**. pointer/defer 제거, Hermes는 conversation_chunk ship,
   neurons 수정 불필요. AGENTS 경계는 "shipper가 adapter로 소스 읽어 redacted transcript 전달"로
-  정직하게 한 줄 확장(session-memory build/GC/RAGFlow 금지는 유지).
+  정직하게 한 줄 확장(session-memory build/GC/backend 금지는 유지).

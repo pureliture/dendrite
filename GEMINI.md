@@ -15,7 +15,7 @@ repo-local provider overlay다. 공통 운영 계약은 `AGENTS.md`를 우선한
 ## Safety
 
 - Provider payload나 Antigravity transcript body를 public output에 쓰지 않는다.
-- RAGFlow direct write/delete/disable, RAGFlow credential, NATS, Docker, SSH,
+- direct backend write/delete/disable, backend credential, NATS, Docker, SSH,
   Ubuntu runtime mutation을 이 repo에 추가하지 않는다.
 - Historical component 이름이 `transcript-ingest`처럼 보여도 동작으로
   분류한다. locator-only POST면 client seam이고, ledger/state/build/reconcile이면

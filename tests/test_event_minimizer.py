@@ -21,7 +21,7 @@ def test_redaction_removes_secret_shapes_and_private_paths():
 
 
 def test_redaction_removes_quoted_secret_assignments():
-    text = 'RAGFLOW_API_KEY="live-token-value" OTHER_SECRET=\'another-live-token\''
+    text = 'BACKEND_API_KEY="live-token-value" OTHER_SECRET=\'another-live-token\''
 
     redacted = redact_text(text)
 
