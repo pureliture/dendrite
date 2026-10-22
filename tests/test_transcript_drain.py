@@ -62,7 +62,7 @@ def test_transcript_drain_enqueues_redacted_document_and_acks_spool(tmp_path, mo
             "--ingress-url",
             "http://127.0.0.1:18080",
             "--target-profile",
-            "ragflow-transcript-memory",
+            "index-transcript-memory",
             "--max-items",
             "5",
         ]
@@ -82,7 +82,7 @@ def test_transcript_drain_enqueues_redacted_document_and_acks_spool(tmp_path, mo
     serialized = json.dumps(document, sort_keys=True)
     assert payload["source"]["producer"] == "dendrite-transcript-drain"
     assert payload["source"]["project"] == "neurons"
-    assert payload["targetProfile"] == "ragflow-transcript-memory"
+    assert payload["targetProfile"] == "index-transcript-memory"
     assert payload["kind"] == "conversation_chunk"
     assert document["metadata"]["project"] == "neurons"
     assert document["metadata"]["agent_id"] == "codex-transcript-capture"

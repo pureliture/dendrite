@@ -44,17 +44,17 @@ class SecretLikeMetadataError(ValueError):
 
 
 class DocumentIndexTargetProfile:
-    """Logical backend profiles. Backend-neutral by contract (no ``ragflow``).
+    """Logical backend profiles. Queue ids owned by neurons TargetProfileRegistry.
 
     A logical profile names *what kind of knowledge* a document belongs to. The
     mapping from a logical profile to a physical backend dataset id is owned by
-    the backend adapter (e.g. the RAGFlow ``ragflow_datasets`` lookup), never by
+    the backend adapter (e.g. the server-side ``datasets`` lookup), never by
     this generic layer.
     """
 
     PROJECT_KNOWLEDGE = "project-knowledge"
     TOOL_SKILL_REGISTRY = "tool-skill-registry"
-    TRANSCRIPT_MEMORY = "transcript-memory"
+    TRANSCRIPT_MEMORY = "index-transcript-memory"
 
     _KNOWN = frozenset({PROJECT_KNOWLEDGE, TOOL_SKILL_REGISTRY, TRANSCRIPT_MEMORY})
 

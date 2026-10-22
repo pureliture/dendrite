@@ -51,7 +51,7 @@ def test_ingress_queue_client_posts_versioned_redacted_contract(monkeypatch) -> 
         },
         packed=SimpleNamespace(filename="chunk.md", body=body, metadata=metadata),
         content_hash=content_hash,
-        target_profile="ragflow-transcript-memory",
+        target_profile="index-transcript-memory",
         kind="conversation_chunk",
         idempotency_key=f"claude:conversation_chunk:{content_hash}",
     )
@@ -74,7 +74,7 @@ def test_ingress_queue_client_posts_versioned_redacted_contract(monkeypatch) -> 
     assert payload["payload"]["document"]["contentType"] == "text/markdown"
     assert payload["payload"]["document"]["body"] == body
     assert payload["contentHash"] == content_hash
-    assert payload["targetProfile"] == "ragflow-transcript-memory"
+    assert payload["targetProfile"] == "index-transcript-memory"
     assert payload["kind"] == "conversation_chunk"
     assert payload["payload"]["document"]["metadata"]["turn_start_index"] == "1"
     assert payload["payload"]["document"]["metadata"]["turn_end_index"] == "2"
@@ -101,7 +101,7 @@ def test_ingress_queue_client_treats_http5xx_as_retryable(monkeypatch) -> None:
             source={"producer": "test"},
             packed=SimpleNamespace(filename="chunk.md", body="# body\n", metadata={}),
             content_hash="sha256:" + "a" * 64,
-            target_profile="ragflow-transcript-memory",
+            target_profile="index-transcript-memory",
             kind="conversation_chunk",
             idempotency_key="codex:conversation_chunk:test",
         )
@@ -130,7 +130,7 @@ def test_ingress_queue_client_invalid_json_response_is_retryable(monkeypatch) ->
             source={"producer": "test"},
             packed=SimpleNamespace(filename="chunk.md", body="# body\n", metadata={}),
             content_hash="sha256:" + "a" * 64,
-            target_profile="ragflow-transcript-memory",
+            target_profile="index-transcript-memory",
             kind="conversation_chunk",
             idempotency_key="codex:conversation_chunk:test",
         )

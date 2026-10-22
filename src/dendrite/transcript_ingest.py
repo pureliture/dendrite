@@ -11,7 +11,7 @@ from .redaction import redact_public_ingress_text, redact_text_v2
 
 INGRESS_SCHEMA_VERSION = "rag_ingress_enqueue.v1"
 INGRESS_PAYLOAD_KIND = "redacted_rag_ready_document"
-DEFAULT_TRANSCRIPT_TARGET_PROFILE = "ragflow-transcript-memory"
+DEFAULT_TRANSCRIPT_TARGET_PROFILE = "index-transcript-memory"
 
 
 class IngressQueueClient:

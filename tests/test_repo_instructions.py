@@ -12,7 +12,7 @@ def test_provider_instruction_files_exist_and_preserve_thin_client_boundary() ->
         assert "한국어" in text
         assert "provider hook -> locator-only" in text
         assert "POST 18080" in text
-        assert "RAGFlow direct write" in text or "direct RAGFlow write" in text
+        assert "direct backend write" in text
         assert "neurons" in text
 
 
@@ -24,6 +24,6 @@ def test_agents_forbids_server_brain_authority() -> None:
         "session-memory build/promote/read SoT",
         "brain.query, MemoryCard, native memory",
         "GC live execute",
-        "`ssh ragflow-ubuntu`",
+        "production SSH access",
     ):
         assert forbidden_owner in text

@@ -94,7 +94,7 @@ metadata가 없거나 읽을 수 없는 경우 private path와 내부 오류를 
 - Antigravity core 또는 `agy` CLI 자체 수정
 - headless 실행을 repo 안에서 `--project <name>`으로 표준화하는 호출 convention 변경
 - provider config, global Stop hook, LaunchAgent의 자동 mutation 또는 설치/활성화
-- `neurons` server-side ingest, ledger, session-memory build/promote, RAGFlow projection, GC 또는 운영 배포 변경
+- `neurons` server-side ingest, ledger, session-memory build/promote, backend projection, GC 또는 운영 배포 변경
 - raw transcript를 capture hook에서 읽거나 저장하는 기능
 - Antigravity local metadata schema migration 또는 write-back
 - metadata가 항상 존재한다고 가정하는 동작

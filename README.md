@@ -49,13 +49,13 @@
 ## Dendrite Boundary
 
 `dendrite`는 LLM-brain/neurons로 transcript locator와 redacted enqueue payload를
-전달하는 Mac thin-client 저장소다. 역사적 `workspace-ragflow-advisor`의
+전달하는 Mac thin-client 저장소다. 역사적 `workspace-advisor`의
 provider/capture 지침 중 **client 책임만** 가져온다. server/brain/GC 권위는
 `neurons`가 소유한다.
 
 Owned here:
 
-- provider hook payload normalization (claude · codex · gemini · antigravity)
+- provider hook payload normalization (claude · codex · gemini · antigravity · hermes · grok · opencode)
 - locator-only local capture/spool/outbox
 - bounded thin shipper enqueue to `POST 18080`
 - public/redacted enqueue payload contract
@@ -66,14 +66,14 @@ Owned here:
 Not owned here (→ `neurons`):
 
 - `Ledger` / `TranscriptIngestWorker` ownership
-- direct RAGFlow write/delete/disable, RAGFlow API credential handling
+- direct backend write/delete/disable, backend API credential handling
 - session-memory build/promote/read SoT
 - brain.query, MemoryCard, native memory
 - GC live execute or GC scheduler wiring
-- Ubuntu runtime mutation, Docker/RAGFlow management, `ssh ragflow-ubuntu`
+- Ubuntu runtime mutation, Docker/runtime management, production SSH access
 
 provider hook은 locator-only를 유지한다 — private spool request를 쓰고 shipper를
-깨울 수 있지만 RAGFlow·NATS·Docker·SSH·GC를 호출하지 않는다. `RAGFLOW_API_KEY`는
+깨울 수 있지만 backend·NATS·Docker·SSH·GC를 호출하지 않는다. `BACKEND_API_KEY`는
 server/runtime lane의 것이며 `dendrite`의 것이 아니다.
 
 `tests/test_client_boundary.py`가 historical `agent_knowledge` source monolith와
@@ -154,7 +154,7 @@ shipper가 best-effort로 비운다. 전송 실패는 local outbox에
 ## 🧰 CLI command surface
 
 `transcript_ingest.py`는 thin enqueue body/client seam만 담는다. server worker,
-ledger/state authority, direct RAGFlow writer, session-memory build/promote, brain
+ledger/state authority, direct backend writer, session-memory build/promote, brain
 query, native memory, GC safety는 `neurons` 책임이다.
 
 <table>
@@ -188,18 +188,22 @@ query, native memory, GC safety는 `neurons` 책임이다.
   <img src="https://img.shields.io/badge/gemini-hook-4285F4?style=flat-square&logo=googlegemini&logoColor=white" alt="gemini" />
   <img src="https://img.shields.io/badge/antigravity-hook-4B8BBE?style=flat-square" alt="antigravity" />
   <img src="https://img.shields.io/badge/hermes-sqlite-9333ea?style=flat-square" alt="hermes" />
+  <img src="https://img.shields.io/badge/opencode-sqlite-22d3ee?style=flat-square" alt="opencode" />
 </p>
 
 각 provider hook은 자기 payload를 normalize해 동일한 locator-only capture request로 모은다.
-hook은 RAGFlow·NATS·Docker·SSH·GC를 호출하지 않는다.
+hook은 backend·NATS·Docker·SSH·GC를 호출하지 않는다.
 
 provider 소스 읽기는 **source adapter 인터페이스 1개**로 통합된다. jsonl provider는 파일
 텍스트 adapter를, `hermes`는 profile별 SQLite store(`~/.hermes/state.db`,
-`~/.hermes/profiles/<profile>/state.db`)를 **read-only**로 읽는 adapter를 쓴다. 둘 다 동일한
+`~/.hermes/profiles/<profile>/state.db`)를 **read-only**로 읽는 adapter를,
+`opencode`는 단일 SQLite store(`~/.local/share/opencode/opencode.db`)를 **read-only**로
+읽는 adapter를 쓴다. 셋 다 동일한
 `conversation_chunk`로 ship되어 `neurons`가 그대로 수용한다. Hermes는 같은 `provider=hermes`
 아래에서도 `hermes_profile`, `agent_id`, `session_id_hash`를 profile별로 분리한다.
-session-memory build/GC/RAGFlow write는 dendrite가 아니라 `neurons` 책임이다.
-자세한 enable 방법·안전 경계·샘플 설정은 [`docs/HERMES_PROVIDER.md`](docs/HERMES_PROVIDER.md).
+session-memory build/GC/backend write는 dendrite가 아니라 `neurons` 책임이다.
+자세한 enable 방법·안전 경계·샘플 설정은 [`docs/HERMES_PROVIDER.md`](docs/HERMES_PROVIDER.md),
+[`docs/OPENCODE_PROVIDER.md`](docs/OPENCODE_PROVIDER.md).
 
 <br/>
 

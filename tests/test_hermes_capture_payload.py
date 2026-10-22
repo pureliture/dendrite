@@ -284,7 +284,7 @@ def _capture_and_drain(tmp_path, db):
     report = drain_transcript_spool_once(
         capture_spool=spool,
         ingress=ingress,
-        target_profile="ragflow-transcript-memory",
+        target_profile="index-transcript-memory",
         max_items=5,
     )
     return report, ingress
@@ -381,7 +381,7 @@ def test_hermes_drain_refuses_when_session_id_missing_in_multisession_store(tmp_
     report = drain_transcript_spool_once(
         capture_spool=spool,
         ingress=ingress,
-        target_profile="ragflow-transcript-memory",
+        target_profile="index-transcript-memory",
         max_items=5,
     )
 
@@ -404,7 +404,7 @@ def test_hermes_drain_quarantines_unreadable_store(tmp_path):
     report = drain_transcript_spool_once(
         capture_spool=spool,
         ingress=ingress,
-        target_profile="ragflow-transcript-memory",
+        target_profile="index-transcript-memory",
         max_items=5,
     )
 
@@ -430,7 +430,7 @@ def test_non_hermes_drain_still_packs_redacted_body(tmp_path):
     drain_transcript_spool_once(
         capture_spool=spool,
         ingress=ingress,
-        target_profile="ragflow-transcript-memory",
+        target_profile="index-transcript-memory",
         max_items=5,
     )
 

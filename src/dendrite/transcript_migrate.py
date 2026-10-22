@@ -25,9 +25,9 @@ from .transcript_capture import (
     TranscriptCaptureSpool,
     normalize_provider_capture_request,
 )
-from .transcript_source import enumerate_hermes_sessions
+from .transcript_source import enumerate_hermes_sessions, enumerate_opencode_sessions
 
-MIGRATION_PROVIDERS = ("codex", "claude", "gemini", "antigravity", "hermes", "grok")
+MIGRATION_PROVIDERS = ("codex", "claude", "gemini", "antigravity", "hermes", "grok", "opencode")
 SESSION_GLOB = "**/*.jsonl"
 GROK_UPDATES_NAME = "updates.jsonl"
 
@@ -44,6 +44,14 @@ def default_source_roots() -> dict[str, Path]:
     hermes_home = os.environ.get("HERMES_HOME")
     hermes_root = Path(hermes_home) if hermes_home else (home / ".hermes")
     grok_home = Path(os.environ.get("GROK_HOME") or (home / ".grok"))
+    opencode_home = os.environ.get("OPENCODE_HOME")
+    opencode_db = Path(os.environ.get("OPENCODE_DB_PATH") or "") if os.environ.get("OPENCODE_DB_PATH") else None
+    if opencode_db is None:
+        opencode_db = (
+            Path(opencode_home).expanduser() / "opencode.db"
+            if opencode_home
+            else home / ".local" / "share" / "opencode" / "opencode.db"
+        )
     return {
         "codex": codex_home / "sessions",
         "claude": home / ".claude" / "projects",
@@ -51,6 +59,7 @@ def default_source_roots() -> dict[str, Path]:
         "antigravity": home / ".antigravity",
         "hermes": hermes_root,
         "grok": grok_home / "sessions",
+        "opencode": opencode_db,
     }
 
 
@@ -98,6 +107,22 @@ def build_grok_migration_request(path: Path, *, project: str = "") -> dict:
         "sessionId": session_id,
     }
     return normalize_provider_capture_request("grok", payload, project=project)
+
+
+def build_opencode_migration_request(db_path: Path, session_id: str, *, project: str = "") -> dict:
+    """Build a locator-only capture request for one historical OpenCode session.
+
+    The locator is the SQLite store path; the (private) session id selects which
+    session the drain's SQLite adapter extracts. Body is never read here.
+    """
+    payload = {
+        "hook_event_name": "session.idle",
+        "transcript_path": str(db_path),
+        "session_id": session_id,
+        "sessionId": session_id,
+        "sessionID": session_id,
+    }
+    return normalize_provider_capture_request("opencode", payload, project=project)
 
 
 def enumerate_grok_sessions(root: Path) -> list[Path]:
@@ -170,6 +195,10 @@ def migrate(
             summary = _migrate_grok(
                 roots.get("grok"), spool, project=project, limit=limit, dry_run=dry_run, report=report
             )
+        elif provider == "opencode":
+            summary = _migrate_opencode(
+                roots.get("opencode"), spool, project=project, limit=limit, dry_run=dry_run, report=report
+            )
         else:
             summary = _migrate_jsonl(
                 provider, roots.get(provider), spool, project=project, limit=limit, dry_run=dry_run, report=report
@@ -238,6 +267,55 @@ def _migrate_grok(
             errors += 1
             report.record_error_class(exc)
     return {"status": "ok", "found": len(files), "spooled": spooled, "errors": errors}
+
+
+def _migrate_opencode(
+    root: Path | None,
+    spool: TranscriptCaptureSpool | None,
+    *,
+    project: str,
+    limit: int | None,
+    dry_run: bool,
+    report: MigrationReport,
+) -> dict:
+    """Migrate OpenCode sessions: one SQLite store, sessions from ``session_v2``.
+
+    Report carries counts only — never the store path or session ids
+    (same privacy posture as Hermes/Grok migrate).
+    """
+    db_path = _resolve_opencode_store(root)
+    if db_path is None:
+        return {"status": "root_unavailable", "found": 0, "spooled": 0, "errors": 0}
+    if not dry_run and limit is None:
+        found = len(enumerate_opencode_sessions(db_path))
+        return {"status": "bounded_limit_required", "found": found, "spooled": 0, "errors": 0}
+    sessions = _limit_items(enumerate_opencode_sessions(db_path), limit)
+    spooled = 0
+    errors = 0
+    for session_id in sessions:
+        try:
+            request = build_opencode_migration_request(db_path, session_id, project=project)
+            if not dry_run:
+                spool.enqueue(request)
+            spooled += 1
+        except Exception as exc:  # noqa: BLE001 - per-session fail-soft; count + continue
+            errors += 1
+            report.record_error_class(exc)
+    return {"status": "ok", "found": len(sessions), "spooled": spooled, "errors": errors}
+
+
+def _resolve_opencode_store(root: Path | None) -> Path | None:
+    """Resolve the OpenCode store file from a migrate root (file or home dir)."""
+    if root is None:
+        return None
+    candidate = Path(root)
+    if candidate.is_file() and not candidate.is_symlink():
+        return candidate
+    if candidate.is_dir() and not candidate.is_symlink():
+        db_path = candidate / "opencode.db"
+        if db_path.is_file() and not db_path.is_symlink():
+            return db_path
+    return None
 
 
 def _migrate_hermes(
@@ -361,6 +439,7 @@ __all__ = [
     "build_grok_migration_request",
     "build_hermes_migration_request",
     "build_migration_request",
+    "build_opencode_migration_request",
     "default_source_roots",
     "discover_hermes_profile_stores",
     "enumerate_grok_sessions",

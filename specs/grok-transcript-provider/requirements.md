@@ -205,7 +205,7 @@ operator 작업이다.
 
 | 항목 | 요구값 |
 | --- | --- |
-| Thin-client boundary | Ledger, session-memory build, GC, RAGFlow write 추가 금지 |
+| Thin-client boundary | Ledger, session-memory build, GC, backend write 추가 금지 |
 | Locator-only hooks | 훅 payload에 transcript 본문 필드 금지(기존 `RAW_TRANSCRIPT_FIELDS` 정책) |
 | Secret / path redaction | stdout·report·public enqueue에 raw private path·transcript 미포함 |
 | Compatibility | 기존 CLI·wire·다른 provider migration 무회귀 |

@@ -9,7 +9,7 @@ import shlex
 from .hermes_profiles import build_hermes_profile_readiness
 
 
-SUPPORTED_PROVIDERS = {"claude", "gemini", "codex", "antigravity", "hermes", "grok"}
+SUPPORTED_PROVIDERS = {"claude", "gemini", "codex", "antigravity", "hermes", "grok", "opencode"}
 SUPPORTED_HOOK_ACTIONS = {"install", "uninstall"}
 
 
@@ -210,6 +210,31 @@ def build_default_provider_source_contracts() -> list[ProviderSourceContract]:
             unsupported_reason=(
                 "grok Build stores sessions under GROK_HOME/sessions/<cwd>/<id>/updates.jsonl; "
                 "live Stop hook provides transcriptPath. dendrite ships opaque conversation_chunk. "
+                "source contract not yet operator-verified for hook install."
+            ),
+        ),
+        ProviderSourceContract(
+            contract_id="opencode-session-idle-session-db.v1",
+            provider="opencode",
+            provider_version="opencode 2.1.2",
+            installed_version_evidence="pending_probe",
+            hook_event="session.idle",
+            source_locator_field="session_db_path",
+            parser_version="provider-transcript-parser.v1",
+            native_parser_status="native_parser_unverified_opencode_sqlite",
+            privacy_redaction_status="privacy_redaction_unverified",
+            verification_status="source_locator_unverified",
+            source_status="source_locator_unverified",
+            hook_install_status="deferred_not_installed",
+            rollback_state="not_installed_no_runtime_rollback_needed",
+            evidence_hash="pending_operator_source_smoke",
+            redacted_evidence_ref="docs/OPENCODE_PROVIDER.md",
+            raw_prompt_policy="locator_only_not_transcript_content",
+            unsupported_reason=(
+                "opencode stores sessions in a single SQLite store "
+                "(~/.local/share/opencode/opencode.db, session_v2 + session_message); "
+                "live session.idle plugin provides sessionID. dendrite reads that store "
+                "read-only via a source adapter and ships a conversation_chunk. "
                 "source contract not yet operator-verified for hook install."
             ),
         ),
@@ -496,7 +521,7 @@ def _provider_config_plan(
     project: str,
     capture_spool: str,
 ) -> dict:
-    if contract.provider not in {"claude", "antigravity", "grok"}:
+    if contract.provider not in {"claude", "antigravity", "grok", "opencode"}:
         return {}
     planned_argv = _planned_argv(
         contract,
@@ -534,7 +559,7 @@ def _provider_config_plan(
                     "settings JSON parses after adding the managed Stop entry",
                     "Stop hook command matches the approved transcript-capture argv",
                     "hook writes locator-only capture requests to the private capture spool",
-                    "no RAGFlow credential or transcript body is present in the hook entry",
+                    "no backend credential or transcript body is present in the hook entry",
                 ],
             }
         }
@@ -563,45 +588,80 @@ def _provider_config_plan(
                     "hooks.json parses after adding the managed entry",
                     f"{contract.hook_event} hook command matches the approved transcript-capture argv",
                     "hook writes locator-only capture requests to the private capture spool",
-                    "no RAGFlow credential or transcript body is present in the hook entry",
+                    "no backend credential or transcript body is present in the hook entry",
                 ],
             }
         }
     # grok
+    if contract.provider == "grok":
+        hook_entry = {
+            "type": "command",
+            "command": _shell_join(planned_argv),
+            "timeout": 10,
+        }
+        return {
+            "provider_config": {
+                "schema_version": "agent_knowledge_grok_build_hook_plan.v1",
+                "provider": "grok",
+                "action": action,
+                "config_format": "grok_hooks_json",
+                "config_scope": "grok_global_hooks",
+                "candidate_write_targets": [
+                    "~/.grok/hooks/*.json",
+                    "<project>/.grok/hooks/*.json",
+                ],
+                "event": contract.hook_event or "Stop",
+                "managed_entry": {
+                    "hooks": {
+                        (contract.hook_event or "Stop"): [
+                            {
+                                "hooks": [hook_entry],
+                            }
+                        ]
+                    }
+                },
+                "merge_strategy": "append_only_to_hooks_Stop_without_rewriting_existing_entries",
+                "install_performed": False,
+                "provider_config_mutation_performed": False,
+                "postcheck": [
+                    "hook JSON under ~/.grok/hooks/ parses after adding the managed Stop entry",
+                    "Stop hook command matches the approved transcript-capture argv",
+                    "hook writes locator-only capture requests to the private capture spool",
+                    "no backend credential or transcript body is present in the hook entry",
+                ],
+            }
+        }
+    # opencode: TypeScript plugin under ~/.config/opencode/plugins/, event session.idle
     hook_entry = {
-        "type": "command",
+        "type": "plugin",
         "command": _shell_join(planned_argv),
         "timeout": 10,
     }
     return {
         "provider_config": {
-            "schema_version": "agent_knowledge_grok_build_hook_plan.v1",
-            "provider": "grok",
+            "schema_version": "agent_knowledge_opencode_plugin_plan.v1",
+            "provider": "opencode",
             "action": action,
-            "config_format": "grok_hooks_json",
-            "config_scope": "grok_global_hooks",
+            "config_format": "opencode_plugin_ts",
+            "config_scope": "opencode_config_plugins",
             "candidate_write_targets": [
-                "~/.grok/hooks/*.json",
-                "<project>/.grok/hooks/*.json",
+                "~/.config/opencode/plugins/dendrite-capture.ts",
+                "~/.config/opencode/opencode.json",
             ],
-            "event": contract.hook_event or "Stop",
+            "event": contract.hook_event or "session.idle",
             "managed_entry": {
-                "hooks": {
-                    (contract.hook_event or "Stop"): [
-                        {
-                            "hooks": [hook_entry],
-                        }
-                    ]
-                }
+                "event": contract.hook_event or "session.idle",
+                "plugin": "dendrite-capture.ts",
+                "hooks": [hook_entry],
             },
-            "merge_strategy": "append_only_to_hooks_Stop_without_rewriting_existing_entries",
+            "merge_strategy": "add_plugin_file_without_rewriting_existing_plugins",
             "install_performed": False,
             "provider_config_mutation_performed": False,
             "postcheck": [
-                "hook JSON under ~/.grok/hooks/ parses after adding the managed Stop entry",
-                "Stop hook command matches the approved transcript-capture argv",
+                "plugin file parses as a valid opencode event plugin",
+                "session.idle handler command matches the approved transcript-capture argv",
                 "hook writes locator-only capture requests to the private capture spool",
-                "no RAGFlow credential or transcript body is present in the hook entry",
+                "no backend credential or transcript body is present in the plugin entry",
             ],
         }
     }

@@ -2,7 +2,7 @@
 
 `dendrite`에서 Hermes agent 세션을 capture 대상 provider로 다루는 방법과 안전
 경계를 정리한다. `dendrite`는 Mac thin-client이며 session-memory build/promote, GC,
-RAGFlow write 같은 server/brain 책임은 갖지 않는다(그건 `neurons`).
+backend write 같은 server/brain 책임은 갖지 않는다(그건 `neurons`).
 
 ## Hermes가 다른 provider와 다른 점
 
@@ -138,7 +138,7 @@ raw session id는 포함하지 않는다.
   private spool에만 남는다).
 - shipper는 approved ingress endpoint(`POST /v1/ingest/enqueue`)만 사용한다. URL에
   credential을 넣지 않는다.
-- session-memory build/promote, GC, RAGFlow write는 dendrite가 하지 않는다(neurons 소유).
+- session-memory build/promote, GC, backend write는 dendrite가 하지 않는다(neurons 소유).
 
 ## 샘플 설정
 
