@@ -17,7 +17,7 @@ from dendrite.rag_ingress.rag_ready_document import build_ingress_enqueue_payloa
 
 def _payload():
     document = build_rag_ready_document(
-        target_profile="transcript-memory",
+        target_profile="index-transcript-memory",
         document_kind="conversation_chunk",
         source_namespace="codex",
         source_alias="dendrite/session",

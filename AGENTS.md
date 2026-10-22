@@ -1,8 +1,8 @@
 # AGENTS.md
 
 이 저장소는 OpenClaw/LLM-brain의 Mac thin-client인 `dendrite`를 소유한다.
-역사적 `workspace-ragflow-advisor`의 provider/capture 지침 중 client 책임만
-가져온다. Ubuntu RAGFlow 운영 agent 지침은 이 repo의 truth가 아니다.
+역사적 `workspace-advisor`의 provider/capture 지침 중 client 책임만
+가져온다. Ubuntu 운영 agent 지침은 이 repo의 truth가 아니다.
 
 ## Identity
 
@@ -43,12 +43,12 @@ Forbidden by default:
 
 - `Ledger` ownership
 - `TranscriptIngestWorker` ownership
-- direct RAGFlow write/delete/disable
-- RAGFlow API credential handling
+- direct backend write/delete/disable
+- backend API credential handling
 - session-memory build/promote/read SoT
 - brain.query, MemoryCard, native memory
 - GC live execute or GC scheduler wiring
-- Ubuntu runtime mutation, Docker/RAGFlow management, or `ssh ragflow-ubuntu`
+- Ubuntu runtime mutation, Docker/runtime management, or production SSH access
 
 ## Safety Lines
 
@@ -59,8 +59,8 @@ Forbidden by default:
 - Do not print private locators, raw private paths, tokens, cookies, bearer
   strings, API keys, raw transcript body, raw dataset_id, or raw document_id.
 - Provider hooks must stay locator-only. They may write private spool requests
-  and kick a shipper, but must not call RAGFlow, NATS, Docker, SSH, or GC.
-- `RAGFLOW_API_KEY` belongs to server/runtime lanes, not to `dendrite`.
+  and kick a shipper, but must not call backend stores, NATS, Docker, SSH, or GC.
+- `BACKEND_API_KEY` belongs to server/runtime lanes, not to `dendrite`.
 
 ## Workflow
 

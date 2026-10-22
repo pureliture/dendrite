@@ -17,7 +17,7 @@
 `dendrite`가 Hermes agent 세션을 식별하고, 기존 Codex/Claude/Gemini/Antigravity
 capture와 같은 source identity 체계로 `locator -> outbox(spool) -> thin shipper ->
 approved ingress POST` 경로에 태울 수 있게 한다. `dendrite`는 Mac thin-client이며
-server brain, MemoryCard, session-memory build, GC, RAGFlow write는 구현하지 않는다.
+server brain, MemoryCard, session-memory build, GC, backend write는 구현하지 않는다.
 
 ### Q: Hermes는 세션을 어디에 어떤 형식으로 저장하는가? (locator의 전제)
 
@@ -44,7 +44,7 @@ locator-only(store 경로만 기록, 본문 미열람)로 두고, drain(thin shi
 - Hermes도 결국 `conversation_chunk`를 ship → neurons가 이미 수용 → **neurons 수정 불필요,
   즉시 end-to-end**.
 - dendrite의 thin 경계는 "provider 로컬 소스를 읽어 redacted transcript 문서 생산"까지로
-  유지된다(jsonl로 이미 하던 일). session-memory build/promote, GC, RAGFlow write는 계속
+  유지된다(jsonl로 이미 하던 일). session-memory build/promote, GC, backend write는 계속
   neurons 소유. (구조적 이유: DB가 Mac 로컬이라 server가 직접 못 읽음 → Mac 쪽 추출 필요.)
 
 ### Q: capture를 무엇이 trigger하는가? hook이 있는가?
@@ -124,7 +124,7 @@ adapter가 conversation_chunk를 만들면 neurons가 이미 수용하므로 poi
 | Worktree isolation | 모든 파일 변경은 `claude/hermes-provider-capture` worktree에서 수행한다. `main`에는 직접 쓰지 않는다. |
 | Source of truth | Phase 1은 `requirements.md`, Phase 2는 `design.md`가 SoT다. HTML은 preview일 뿐이다. |
 | TDD | code-changing work는 red -> green -> refactor. 동작 test를 먼저 추가하고 fail 확인 후 production code 작성. |
-| Thin-client boundary | dendrite는 provider 소스를 읽어 redacted transcript 문서(conversation_chunk)를 만드는 것까지만 한다(이미 jsonl로 하던 일). session-memory build/promote, GC, RAGFlow write, MemoryCard는 neurons 소유. |
+| Thin-client boundary | dendrite는 provider 소스를 읽어 redacted transcript 문서(conversation_chunk)를 만드는 것까지만 한다(이미 jsonl로 하던 일). session-memory build/promote, GC, backend write, MemoryCard는 neurons 소유. |
 | Source read | capture는 locator-only(본문 미열람). drain은 source adapter로 소스를 읽되 Hermes SQLite는 read-only/immutable(write/checkpoint 금지). |
 | Redaction | public 표면은 hash/공개 metadata만. 원경로/secret/raw body 미노출. 기존 redaction 규칙 재사용. |
 | Approved endpoint | shipper는 `POST /v1/ingest/enqueue`만 사용. URL에 credential 금지. |
@@ -146,7 +146,7 @@ adapter가 conversation_chunk를 만들면 neurons가 이미 수용하므로 poi
 ## 검증 완료 기준
 
 - L0 경계 게이트: 기존 boundary/repo-instruction test 통과. 새 코드가 thin-client 금지
-  소유권(session-memory build/promote, GC, RAGFlow write/credential)을 침범하지 않는다.
+  소유권(session-memory build/promote, GC, backend write/credential)을 침범하지 않는다.
 - L1 자동 검증: `uv run pytest -q` 통과. 최소 포함: provider contracts(hermes 포함),
   hermes capture/drain(SQLite adapter), client boundary, jsonl regression.
 - L2 로컬 런타임 스모크: capture가 locator-only JSON report를 만들고 원경로/raw/credential을
@@ -162,8 +162,8 @@ adapter가 conversation_chunk를 만들면 neurons가 이미 수용하므로 poi
   conversation_chunk ship, bounded local/recording-ingress smoke, JSON report 검증.
 - 별도 승인 필요: 실제 neurons endpoint로의 live `POST` canary, 실제 Hermes 세션 생성/열람.
 - 금지: Hermes DB write/delete, WAL checkpoint trigger, raw transcript body 출력, private
-  locator(원경로)/raw session_id 출력, token/cookie/bearer 출력, `RAGFLOW_API_KEY` 취급,
-  dataset_id/document_id 출력, `Ledger`/`TranscriptIngestWorker`/brain/server/GC/RAGFlow
+  locator(원경로)/raw session_id 출력, token/cookie/bearer 출력, `BACKEND_API_KEY` 취급,
+  dataset_id/document_id 출력, `Ledger`/`TranscriptIngestWorker`/brain/server/GC/backend
   management 실행, session-memory build/promote.
 
 ## 미결정 항목 / 후속작업

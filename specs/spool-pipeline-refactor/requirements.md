@@ -77,7 +77,7 @@ Spool + Shipping Policy 범위까지 포함한다. 즉 retry/quarantine/unreacha
 | Verification | 각 milestone은 구체적 evidence가 있어야 done 처리한다. |
 | Runtime validation | 단위 테스트 외에 CLI/hook/drain runtime smoke evidence를 확보한다. |
 | Production validation | production-adjacent 검증은 `dendrite` client seam에서 승인된 방식으로만 수행하고, raw transcript/locator/credential을 출력하지 않는다. Live `POST` synthetic canary는 별도 승인 gate가 있을 때만 수행한다. |
-| Boundary | `dendrite`는 Mac thin-client이며 server/brain/GC/RAGFlow credential ownership을 갖지 않는다. |
+| Boundary | `dendrite`는 Mac thin-client이며 server/brain/GC/backend credential ownership을 갖지 않는다. |
 | Compatibility | 기존 CLI, hook payload, enqueue payload wire format은 변경하지 않는다. |
 | Review | spec 생성 후 `codebase_architecture_manager`, `system_architecture_manager` 리뷰를 받고 반영한다. |
 | Documentation promotion | spec/review artifact는 작업 SoT로만 유지하고, 별도 승인 없이 공식 문서/registry로 승격하지 않는다. |
@@ -102,7 +102,7 @@ Spool + Shipping Policy 범위까지 포함한다. 즉 retry/quarantine/unreacha
 
 - 허용: locator-only capture, bounded dry-run, read-only production-adjacent audit, local/fake-server smoke, JSON report 검증, spool depth/status 검증.
 - 별도 승인 필요: live `POST /v1/ingest/enqueue` synthetic canary, 실제 provider session 생성, 실제 production enqueue/ship, 승인된 synthetic canary가 아닌 운영 데이터 기반 검증.
-- 금지: raw transcript body 출력, private locator 출력, token/credential 출력, `RAGFLOW_API_KEY` 취급, dataset_id/document_id 출력, `Ledger`/`TranscriptIngestWorker`/brain/server/GC 소유권 실행, SSH/Docker/RAGFlow management, direct RAGFlow write/delete/disable.
+- 금지: raw transcript body 출력, private locator 출력, token/credential 출력, `BACKEND_API_KEY` 취급, dataset_id/document_id 출력, `Ledger`/`TranscriptIngestWorker`/brain/server/GC 소유권 실행, SSH/Docker/runtime management, direct backend write/delete/disable.
 
 ## 미결정 항목
 

@@ -32,7 +32,7 @@ RAW_TRANSCRIPT_FIELDS = {
     "transcript_content",
     "turns",
 }
-SUPPORTED_TRANSCRIPT_PROVIDERS = {"claude", "gemini", "codex", "antigravity", "hermes", "grok"}
+SUPPORTED_TRANSCRIPT_PROVIDERS = {"claude", "gemini", "codex", "antigravity", "hermes", "grok", "opencode"}
 SOURCE_UNPROVEN_PROVIDERS: set[str] = set()
 # Shared pattern for provider session ids (codex, grok, …).
 SESSION_ID_PATTERN = re.compile(r"^[A-Za-z0-9_.:-]{8,160}$")
@@ -40,6 +40,10 @@ CODEX_SESSION_ID_PATTERN = SESSION_ID_PATTERN  # backward-compatible alias
 HERMES_DEFAULT_STATE_DB = ".hermes/state.db"
 HERMES_LOCATOR_KEYS = ("hermes_db_path", "state_db_path", "session_db_path")
 HERMES_PROFILE_KEYS = ("hermes_profile", "profile", "profile_name")
+OPENCODE_DEFAULT_STATE_DB = ".local/share/opencode/opencode.db"
+OPENCODE_DB_PATH_ENV = "OPENCODE_DB_PATH"
+OPENCODE_HOME_ENV = "OPENCODE_HOME"
+OPENCODE_LOCATOR_KEYS = ("opencode_db_path", "state_db_path", "session_db_path")
 ANTIGRAVITY_HOME_ENV = "ANTIGRAVITY_HOME"
 ANTIGRAVITY_DEFAULT_HOME = ".gemini/antigravity-cli"
 ANTIGRAVITY_DEFAULT_CONFIG_HOME = ".gemini/config"
@@ -87,10 +91,6 @@ def canonicalize_project(project: str) -> str:
             parts = parts[:marker_index]
             lower_parts = lower_parts[:marker_index]
             break
-    if ".openclaw" in lower_parts:
-        marker_index = lower_parts.index(".openclaw")
-        if marker_index + 1 < len(parts):
-            return parts[marker_index + 1]
     if "projects" in lower_parts:
         marker_index = lower_parts.index("projects")
         if marker_index + 1 < len(parts):
@@ -103,11 +103,6 @@ def _canonicalize_project_slug(value: str) -> str | None:
     lower = normalized.lower()
     if not normalized:
         return ""
-    openclaw_marker = "openclaw-"
-    if openclaw_marker in lower and ("users-" in lower or "home-" in lower):
-        tail = lower[lower.index(openclaw_marker) + len(openclaw_marker) :]
-        if tail:
-            return tail
     projects_marker = "projects-"
     if projects_marker in lower and ("users-" in lower or "home-" in lower):
         tail = lower[lower.index(projects_marker) + len(projects_marker) :]
@@ -160,6 +155,10 @@ def _looks_like_provider_storage_path(value: str) -> bool:
     if _contains_subsequence(parts, [".grok", "sessions"]) or ".grok" in parts:
         return True
     if ".hermes" in parts:
+        return True
+    if "opencode.db" in parts or ".opencode" in parts:
+        return True
+    if _contains_subsequence(parts, ["opencode", "opencode.db"]):
         return True
     return ".system_generated" in parts
 
@@ -278,7 +277,7 @@ def normalize_provider_capture_request(provider: str, payload: dict, *, project:
         },
         "capabilities": {
             "transcript_content_in_event": False,
-            "hook_called_ragflow": False,
+            "hook_called_backend": False,
             "provider_execution_mutated": False,
         },
         "redaction_version": "redaction.v2",
@@ -294,9 +293,11 @@ def _extract_source_locator(provider: str, payload: dict) -> str:
     # Hermes/Grok resolve their own locator (existence + non-symlink guard) before
     # the generic key loop, so explicit transcript_path still gets the no-fabricated-
     # path guarantee. Empty result means "no locator", not fall-through.
-    if provider in {"hermes", "grok"}:
+    if provider in {"hermes", "grok", "opencode"}:
         if provider == "hermes":
             locator = _resolve_hermes_session_locator(payload)
+        elif provider == "opencode":
+            locator = _resolve_opencode_session_locator(payload)
         else:
             locator = _resolve_grok_session_locator(payload)
         if locator:
@@ -357,11 +358,49 @@ def _existing_non_symlink_store(candidate: Path) -> str:
     return ""
 
 
+def _default_opencode_db_path() -> Path:
+    """Return the default OpenCode session store path (env override first)."""
+    explicit = os.environ.get(OPENCODE_DB_PATH_ENV)
+    if explicit:
+        return Path(explicit).expanduser()
+    home = os.environ.get(OPENCODE_HOME_ENV)
+    if home:
+        return Path(home).expanduser() / "opencode.db"
+    return Path.home() / OPENCODE_DEFAULT_STATE_DB
+
+
+def _resolve_opencode_session_locator(payload: dict) -> str:
+    """Resolve the OpenCode SQLite store path without reading it.
+
+    OpenCode keeps every session in one SQLite store (default
+    ``~/.local/share/opencode/opencode.db``, override via ``OPENCODE_DB_PATH`` or
+    ``OPENCODE_HOME``). This returns the store path only when the file already
+    exists and is not a symlink; it never opens, connects to, or queries the
+    database. An absent explicit path yields an empty locator (never fabricated).
+    """
+    for key in (*OPENCODE_LOCATOR_KEYS, "transcript_path", "transcriptPath", "source_locator", "runtime_handle"):
+        value = payload.get(key)
+        if isinstance(value, str) and value:
+            # First explicit key wins; an absent/symlinked file yields "" (never
+            # fall through to the default store, never fabricate a path).
+            return _existing_non_symlink_store(Path(value).expanduser())
+    return _existing_non_symlink_store(_default_opencode_db_path())
+
+
+def _opencode_session_id(payload: dict) -> str:
+    """OpenCode plugin payloads use sessionID; accept snake_case too."""
+    return str(
+        payload.get("session_id") or payload.get("sessionId") or payload.get("sessionID") or ""
+    )
+
+
 def _provider_session_id(provider: str, payload: dict) -> str:
     if provider == "antigravity":
         return str(payload.get("conversationId") or payload.get("conversation_id") or "")
     if provider == "grok":
         return _grok_session_id(payload)
+    if provider == "opencode":
+        return _opencode_session_id(payload)
     return ""
 
 
@@ -668,6 +707,17 @@ def _capture_event_type(provider: str, payload: dict) -> str:
     }:
         return "session_end"
     if provider == "grok" and hook_event_name in {"Stop", "stop", "SessionEnd", "session_end"}:
+        return "session_end"
+    if provider == "opencode" and hook_event_name in {
+        "session.idle",
+        "session_idle",
+        "session:idle",
+        "idle",
+        "Stop",
+        "stop",
+        "SessionEnd",
+        "session_end",
+    }:
         return "session_end"
     return str(payload.get("event_type") or "session_end")
 

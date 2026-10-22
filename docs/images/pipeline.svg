@@ -216,7 +216,7 @@
     <line x1="78" y1="580" x2="1202" y2="580" stroke="#1f2d4a"/>
     <g font-size="11">
       <text x="78" y="606" fill="#9fb3d1">◆ dendrite 가 소유: provider hook · locator capture · spool/outbox · tick-bounded thin shipper · redaction</text>
-      <text x="78" y="626" fill="#fca5a5">◆ Not owned → neurons: Ledger · worker · RAGFlow write · session/native memory · GC</text>
+      <text x="78" y="626" fill="#fca5a5">◆ Not owned → neurons: Ledger · worker · backend write · session/native memory · GC</text>
       <text x="78" y="646" fill="#9fb3d1">◆ raw transcript body 는 읽지 않음 · token · path · dataset_id 는 redaction boundary 에서 차단</text>
       <text x="730" y="646" fill="#7c8cae">◆ thin-client 는 상태를 보관하지 않고 redacted locator 만 loopback 으로 전달</text>
     </g>

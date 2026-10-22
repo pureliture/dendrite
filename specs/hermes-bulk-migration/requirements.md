@@ -84,7 +84,7 @@ ship 자체는 기존 drain 책임이며 live endpoint 검증은 이번 scope �
 | Source read | Hermes enumerate는 read-only/immutable(write/checkpoint 금지). 내용 미열람(세션키만). |
 | Idempotency | re-run 시 동일 세션 중복 적재 금지. |
 | Redaction/secrecy | report·stdout에 원경로/raw session_id/세션 내용 미출력(카운트만). |
-| Thin-client boundary | session-memory build/promote, GC, RAGFlow write 미추가(neurons 소유). |
+| Thin-client boundary | session-memory build/promote, GC, backend write 미추가(neurons 소유). |
 | Compatibility | 기존 jsonl migration·CLI·wire format 무회귀. |
 | Boundary tests | `test_client_boundary`/`test_repo_instructions` 통과. |
 
@@ -113,7 +113,7 @@ ship 자체는 기존 drain 책임이며 live endpoint 검증은 이번 scope �
   단건/가짜-ingress 검증, 실 DB dry-run 카운트.
 - 별도 승인: 실제 neurons endpoint로의 live ship.
 - 금지: Hermes DB write/delete, WAL checkpoint, 세션 내용/raw session_id/원경로 출력,
-  session-memory build/promote, GC/RAGFlow management.
+  session-memory build/promote, GC/runtime management.
 
 ## 미결정 항목
 

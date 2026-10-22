@@ -174,7 +174,7 @@ def test_cli_transcript_capture_best_effort_kickstarts_after_spooling(tmp_path, 
                 str(tmp_path / "capture-spool"),
                 "--stdin-json",
                 "--kickstart-label",
-                "com.ragflow.agent-knowledge.transcript-ingest",
+                "com.dendrite.transcript-drain",
             ]
         )
         == 0
@@ -185,7 +185,7 @@ def test_cli_transcript_capture_best_effort_kickstarts_after_spooling(tmp_path, 
     assert calls
     argv = calls[0][0][0]
     assert argv[:2] == ["launchctl", "kickstart"]
-    assert argv[2].endswith("/com.ragflow.agent-knowledge.transcript-ingest")
+    assert argv[2].endswith("/com.dendrite.transcript-drain")
 
 
 def test_antigravity_capture_rejects_raw_transcript_content(tmp_path):

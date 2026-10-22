@@ -212,7 +212,7 @@ Repeated retryable failures must remain bounded and observable. Implementation m
 
 M6 default completion is fail-closed: read-only operational audit plus local/fake-server synthetic smoke only. A live `POST /v1/ingest/enqueue` is not part of the default gate unless a separate approval gate names an approved synthetic canary endpoint, target profile, payload shape, and rollback/no-retention expectation.
 
-Real provider session generation, real production enqueue/ship, private runtime locator access, `RAGFLOW_API_KEY` handling, SSH, Docker, GC, or server/brain mutation remain out of scope for `dendrite`.
+Real provider session generation, real production enqueue/ship, private runtime locator access, `BACKEND_API_KEY` handling, SSH, Docker, GC, or server/brain mutation remain out of scope for `dendrite`.
 
 M6 evidence must state separately:
 
@@ -229,7 +229,7 @@ M6 evidence must state separately:
 - HTTP 4xx and accepted=false are permanent only when the response safely identifies a client-owned payload rejection.
 - Invalid local payload shape is permanent for the current item.
 - Duplicate enqueue requests remain idempotent through existing filename/content-hash behavior.
-- No error path may print raw transcript body, private locator, token, credential, raw `dataset_id`, raw `document_id`, or `RAGFLOW_API_KEY`.
+- No error path may print raw transcript body, private locator, token, credential, raw `dataset_id`, raw `document_id`, or `BACKEND_API_KEY`.
 - If implementation discovers that these classifications would change the approved requirements, work stops and regresses to `grill-to-spec` Phase 1/2 instead of silently changing SoT.
 
 ## Testing Strategy
@@ -249,7 +249,7 @@ Primary test layers:
 - Domain tests for `TranscriptCaptureSpool` state transitions and recoverable quarantine.
 - Transport tests for credential rejection, 4xx/5xx/unreachable/invalid JSON/accepted=false classification.
 - Drain/outbox integration tests using temp spools and fake HTTP responders.
-- Boundary tests proving forbidden server/brain/GC/RAGFlow credential ownership does not appear, including `RAGFLOW_API_KEY`, SSH, Docker/RAGFlow management, GC scheduler wiring, and direct RAGFlow mutation strings.
+- Boundary tests proving forbidden server/brain/GC/backend credential ownership does not appear, including `BACKEND_API_KEY`, SSH, Docker/runtime management, GC scheduler wiring, and direct backend mutation strings.
 - CLI/runtime smoke tests proving reports are redacted and the boundary output is unchanged.
 
 ## Milestones
@@ -354,10 +354,10 @@ Evidence:
 
 Done when:
 
-- Read-only production-adjacent audit confirms the `dendrite` local client surface without mutating Ubuntu/RAGFlow/server state.
+- Read-only production-adjacent audit confirms the `dendrite` local client surface without mutating Ubuntu/server state.
 - Local/fake-server synthetic smoke proves the refactored client path without raw/private operational data.
 - Live `POST /v1/ingest/enqueue` synthetic canary is skipped unless a separate approval gate names the approved canary endpoint, target profile, payload shape, and rollback/no-retention expectation.
-- Real provider session generation, real production enqueue/ship, private runtime locator access, SSH, Docker, RAGFlow credential handling, GC, or server/brain mutation is not performed.
+- Real provider session generation, real production enqueue/ship, private runtime locator access, SSH, Docker, backend credential handling, GC, or server/brain mutation is not performed.
 
 Evidence:
 

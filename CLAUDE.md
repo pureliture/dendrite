@@ -17,7 +17,7 @@
   명시적 사용자 의도와 rollback path가 있을 때만 수행한다.
 - Raw transcript body, private locator, token, raw dataset_id, raw document_id를
   출력하지 않는다.
-- `RAGFLOW_API_KEY`, direct RAGFlow write/delete/disable, Docker/SSH/Ubuntu
+- `BACKEND_API_KEY`, direct backend write/delete/disable, Docker/SSH/Ubuntu
   runtime mutation을 `dendrite`에 추가하지 않는다.
 - `Ledger`, `TranscriptIngestWorker`, session-memory build/promote, brain.query,
   MemoryCard, native memory, GC runner를 import하거나 소유하지 않는다.
