@@ -44,46 +44,84 @@ OpenCode는 `~/.config/opencode/plugins/` 아래 TypeScript 플러그인으로
 `session.idle` 이벤트를 받을 수 있다. 다른 provider와 동일하게
 hook 자동설치는 deferred(operator 수동 연결), capture는 hook 또는 explicit invocation으로 동작.
 
-### 1) 플러그인 설치 (operator 수동)
+### 1) 플러그인 설치 (operator 수동, 설치됨 2026-10-22)
 
-`~/.config/opencode/plugins/dendrite-capture.ts`:
+`~/.config/opencode/plugins/dendrite-capture.ts` (opencode v2 플러그인 형식,
+`Plugin.define` + `setup` + `ctx.event.subscribe`):
 
 ```typescript
-import type { Plugin } from "@opencode-ai/plugin"
+import { Plugin } from "@opencode/plugin"
 import { spawn } from "node:child_process"
 
-export const DendriteCapturePlugin: Plugin = async () => {
-  return {
-    event: async ({ event }) => {
-      if (event.type !== "session.idle") return
-      const sessionId = (event.properties as { sessionID?: string })?.sessionID
-      if (!sessionId) return
+const CAPTURE_BIN = "~/Projects/dendrite/.venv/bin/python"
+const CAPTURE_ARGV = [
+  "-m", "dendrite", "transcript-capture",
+  "--provider", "opencode", "--project", "opencode",
+  "--spool", "~/.local/state/dendrite/capture-spool",
+  "--stdin-json", "--non-fatal",
+]
 
-      const payload = JSON.stringify({
-        hook_event_name: "session.idle",
-        sessionID: sessionId,
-        timestamp: new Date().toISOString(),
-      })
-
-      const proc = spawn(
-        "uv",
-        ["run", "python", "-m", "dendrite", "transcript-capture",
-         "--provider", "opencode", "--project", "<project>",
-         "--spool", "<private-transcript-capture-spool>", "--stdin-json"],
-        { stdio: ["pipe", "ignore", "ignore"], detached: true },
-      )
-      proc.stdin.write(payload)
-      proc.stdin.end()
-      proc.unref()
-    },
+function sessionIdOf(event: unknown): string {
+  if (!event || typeof event !== "object") return ""
+  const data = (event as Record<string, unknown>)["data"]
+  if (!data || typeof data !== "object") return ""
+  const d = data as Record<string, unknown>
+  for (const key of ["sessionID", "sessionId", "session_id"]) {
+    const v = d[key]
+    if (typeof v === "string" && v) return v
   }
+  return ""
 }
 
-export default DendriteCapturePlugin
+export default Plugin.define({
+  id: "dendrite-capture",
+  async setup(ctx) {
+    const controller = new AbortController()
+    void (async () => {
+      try {
+        for await (const event of ctx.event.subscribe({ signal: controller.signal })) {
+          const etype = (event as { type?: string })?.type
+          if (etype !== "session.execution.succeeded" && etype !== "session.idle") continue
+          const sessionID = sessionIdOf(event)
+          if (!sessionID) continue
+          const payload = JSON.stringify({
+            hook_event_name: "session.idle",
+            session_id: sessionID,
+            sessionID,
+            workspacePaths: [],
+            timestamp: new Date().toISOString(),
+          })
+          try {
+            const proc = spawn(CAPTURE_BIN, CAPTURE_ARGV,
+              { stdio: ["pipe", "ignore", "ignore"], detached: true })
+            proc.on("error", () => {})
+            proc.stdin.write(payload)
+            proc.stdin.end()
+            proc.unref()
+          } catch {
+            // never break the session on hook failure
+          }
+        }
+      } catch {
+        // stream aborted on unload; nothing to do
+      }
+    })()
+    return () => controller.abort()
+  },
+})
 ```
 
-`<project>`와 `<private-transcript-capture-spool>`은 아래 plan 명령이
-출력하는 정확한 argv로 치환한다.
+이벤트 실측 메모 (opencode 2.1.2 바이너리 + live 검증):
+- 서버 이벤트는 envelope `{id, created, type, durable, data}` 형태이며 세션 id는
+  `data.sessionID`에 있다. 구형 v1식 최상위 `event.sessionID` 가정이 통하지 않는다.
+- 주 트리거는 `session.execution.succeeded`다. headless `opencode run` 세션은
+  `session.idle`을 발생시키지 않으므로 idle만 구독하면 아무것도 캡처되지 않는다.
+  `session.idle`은 interactive 세션용 fallback으로 함께 구독한다.
+- 이벤트 루프 안에서 `ctx.session.get` 같은 client read를 await하면 후속 이벤트가
+  막힐 수 있어 project 라벨은 CLI `--project` fallback(`opencode`)을 쓴다.
+  neurons가 authority를 재확인한다.
+- 동일 세션의 중복 발화는 `request_id` 결정적 해시 + spool `write_json_once`로
+  멱등하게 합쳐진다.
 
 ### 2) capture (locator-only spool)
 
