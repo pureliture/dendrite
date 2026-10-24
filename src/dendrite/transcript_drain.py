@@ -22,6 +22,10 @@ RECOVERABLE_ERROR_CLASSES = {
     "ingress_unreachable",
     "delivery_state_unavailable",
 }
+# A request that keeps failing must not block the spool head forever: after
+# this many retries it is quarantined so other clients' transcripts keep
+# flowing (head-of-line isolation).
+MAX_DELIVERY_ATTEMPTS = 8
 
 
 @dataclass(frozen=True)
@@ -115,6 +119,7 @@ def _drain_transcript_spool_once(
             outbox, snapshot_hash, documents, next_part = _prepare_delivery(
                 capture_spool, claimed, request, target_profile
             )
+            next_part_before = next_part
             while next_part < len(documents) and post_budget > 0:
                 packed = documents[next_part]
                 content_hash = _sha256(packed.body)
@@ -140,9 +145,20 @@ def _drain_transcript_spool_once(
                 except OSError:
                     pass  # The request is already acked; leftover snapshots are safe to retain.
             else:
-                capture_spool.requeue_with_failure(claimed)
-                delivery_pending += 1
-                last_status = "delivery_pending"
+                # Multipart continuation. Count every requeue so a request that
+                # never completes is eventually quarantined instead of retrying
+                # forever (poison-pill protection for the shared spool).
+                attempts = capture_spool.bump_delivery_attempt(claimed)
+                if attempts >= MAX_DELIVERY_ATTEMPTS:
+                    failure = _failure_record("delivery_retry_exhausted", claimed)
+                    failure["recoverable"] = False
+                    capture_spool.quarantine_with_failure(claimed, failure)
+                    quarantined += 1
+                    last_status = "quarantined"
+                else:
+                    capture_spool.requeue_with_failure(claimed)
+                    delivery_pending += 1
+                    last_status = "delivery_pending"
                 break
         except Exception as exc:
             error_class = _classify_error(exc)
@@ -150,6 +166,15 @@ def _drain_transcript_spool_once(
             last_error_class = error_class
             if claimed.exists():
                 if _is_recoverable_error_class(error_class):
+                    if int(failure.get("retry_attempts") or 0) >= MAX_DELIVERY_ATTEMPTS:
+                        exhausted = dict(failure)
+                        exhausted["error_class"] = "retry_exhausted"
+                        exhausted["recoverable"] = False
+                        exhausted["message"] = f"{error_class} retry exhausted"
+                        capture_spool.quarantine_with_failure(claimed, exhausted)
+                        quarantined += 1
+                        last_status = "quarantined"
+                        continue
                     capture_spool.requeue_with_failure(claimed, failure)
                     retry_pending += 1
                     last_status = "retry_pending"

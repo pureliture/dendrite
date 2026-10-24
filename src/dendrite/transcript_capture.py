@@ -789,6 +789,22 @@ class TranscriptCaptureSpool:
     def ack(self, processing_path: Path | str) -> Path:
         return self._spool.ack(processing_path)
 
+    def bump_delivery_attempt(self, processing_path: Path | str) -> int:
+        """Increment and return the durable delivery-attempt counter.
+
+        Used by the drainer to quarantine a request that never completes,
+        so one client's stuck transcript cannot retry forever.
+        """
+
+        path = Path(processing_path)
+        request = json.loads(path.read_text(encoding="utf-8"))
+        delivery = dict(request.get("delivery") or {})
+        attempts = int(delivery.get("attempts") or 0) + 1
+        delivery["attempts"] = attempts
+        request["delivery"] = delivery
+        self._spool.replace_json(path, request)
+        return attempts
+
     def checkpoint_delivery(self, processing_path: Path | str, *, snapshot_hash: str, next_part: int) -> None:
         """Persist only delivery progress here; redacted bodies live in the outbox."""
         source = Path(processing_path)
