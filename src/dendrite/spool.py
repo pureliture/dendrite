@@ -112,7 +112,21 @@ class JsonFileSpool:
         return None
 
     def files(self, subdir: str) -> list[Path]:
-        return sorted(self._subdir_path(subdir).glob("*.json"))
+        """Return spool files oldest-first.
+
+        Ordering by mtime (not filename) is required for forward progress: a
+        request that is requeued after a partial multipart delivery must go to
+        the tail, otherwise the lexicographically-first request monopolises the
+        queue head and blocks every other client's transcripts forever.
+        """
+
+        def _key(path: Path) -> tuple[float, str]:
+            try:
+                return (path.stat().st_mtime, path.name)
+            except OSError:  # pragma: no cover - raced deletion
+                return (0.0, path.name)
+
+        return sorted(self._subdir_path(subdir).glob("*.json"), key=_key)
 
     def claim_next(self, *, empty_message: str = "no pending spool events") -> Path:
         pending = self.files("pending")
