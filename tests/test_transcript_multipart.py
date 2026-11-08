@@ -10,9 +10,11 @@ from dataclasses import asdict
 import pytest
 
 from dendrite.redaction import redact_public_ingress_text
-from dendrite.transcript_capture import TranscriptCaptureSpool, normalize_provider_capture_request
-from dendrite.transcript_drain import build_drain_document, build_drain_documents, drain_transcript_spool_once
-from dendrite.transcript_source import MAX_TRANSCRIPT_BODY_CHARS, adapter_for
+from dendrite.capture_spool import TranscriptCaptureSpool
+from dendrite.providers.normalize import normalize_provider_capture_request
+from dendrite.transcript_drain import drain_transcript_spool_once
+from dendrite.drain_builder import build_drain_document, build_drain_documents
+from dendrite.drain_builder import MAX_TRANSCRIPT_BODY_CHARS, adapter_for
 from dendrite.transcript_ingest import IngressQueueClient
 
 

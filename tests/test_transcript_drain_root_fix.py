@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from dendrite.spool import JsonFileSpool
-from dendrite.transcript_capture import TranscriptCaptureSpool
+from dendrite.capture_spool import TranscriptCaptureSpool
 from dendrite.transcript_drain import MAX_DELIVERY_ATTEMPTS, _drain_transcript_spool_once
 
 
@@ -59,7 +59,7 @@ def test_multipart_retry_cap_quarantines_instead_of_looping_forever(tmp_path: Pa
     pending_dir.mkdir(parents=True, exist_ok=True)
     source = tmp_path / "session.jsonl"
     source.write_text("hello transcript\n", encoding="utf-8")
-    from dendrite.transcript_capture import normalize_provider_capture_request
+    from dendrite.providers.normalize import normalize_provider_capture_request
 
     request = normalize_provider_capture_request(
         "claude",

@@ -4,7 +4,8 @@ import json
 import urllib.error
 
 from dendrite.cli import main
-from dendrite.transcript_capture import TranscriptCaptureSpool, normalize_provider_capture_request
+from dendrite.capture_spool import TranscriptCaptureSpool
+from dendrite.providers.normalize import normalize_provider_capture_request
 
 
 def _capture_request(source, *, project: str = "neurons") -> dict:

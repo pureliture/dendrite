@@ -8,9 +8,9 @@ from datetime import datetime
 import pytest
 
 from dendrite.cli import main
-from dendrite import transcript_capture
-from dendrite.transcript_capture import (
-    TranscriptCaptureSpool,
+from dendrite.providers import antigravity as transcript_capture
+from dendrite.capture_spool import TranscriptCaptureSpool
+from dendrite.providers.normalize import (
     has_workspace_path,
     normalize_provider_capture_request,
 )

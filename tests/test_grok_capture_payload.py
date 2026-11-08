@@ -10,19 +10,14 @@ import hashlib
 import json
 from pathlib import Path
 
-from dendrite.provider_contracts import (
-    build_default_provider_source_contracts,
-    build_provider_doctor_report,
-    build_provider_hook_plan,
-)
+from dendrite.providers.contracts_def import build_default_provider_source_contracts
+from dendrite.providers.doctor import build_provider_doctor_report
+from dendrite.providers.hook_plan import build_provider_hook_plan
 from dendrite.providers.contracts import no_op_hook_response, normalize_provider_event
-from dendrite.transcript_capture import (
-    SUPPORTED_TRANSCRIPT_PROVIDERS,
-    TranscriptCaptureSpool,
-    normalize_provider_capture_request,
-)
+from dendrite.capture_spool import TranscriptCaptureSpool
+from dendrite.providers.normalize import SUPPORTED_TRANSCRIPT_PROVIDERS, normalize_provider_capture_request
 from dendrite.transcript_drain import drain_transcript_spool_once
-from dendrite.transcript_migrate import (
+from dendrite.migrate_runner import (
     MIGRATION_PROVIDERS,
     build_grok_migration_request,
     enumerate_grok_sessions,

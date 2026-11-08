@@ -3,18 +3,15 @@ from __future__ import annotations
 import json
 
 from dendrite.cli import main
-from dendrite.provider_contracts import (
-    build_default_provider_source_contracts,
-    build_provider_doctor_report,
-    build_provider_hook_plan,
-)
+from dendrite.providers.contracts_def import build_default_provider_source_contracts
+from dendrite.providers.doctor import build_provider_doctor_report
+from dendrite.providers.hook_plan import build_provider_hook_plan
 from dendrite.providers.contracts import no_op_hook_response, normalize_provider_event
 
 
 def test_default_provider_source_contracts_are_locator_only() -> None:
     contracts = {contract.provider: contract for contract in build_default_provider_source_contracts()}
-
-    assert set(contracts) == {"claude", "gemini", "codex", "antigravity", "hermes", "grok", "opencode"}
+    assert set(contracts) == {"claude", "gemini", "codex", "antigravity", "hermes", "grok", "opencode", "omp"}
     assert contracts["codex"].raw_prompt_policy == "locator_only_not_transcript_content"
     # The four live-smoked providers store per-session jsonl and are locator-verified.
     for name in ("claude", "gemini", "codex", "antigravity"):
