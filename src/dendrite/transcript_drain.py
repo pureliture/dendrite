@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import fcntl
 import json
+import os
+from dataclasses import asdict
 from .capture_spool import TranscriptCaptureSpool
 from .transcript_capture import validate_capture_request
 from .transcript_ingest import IngressQueueClient
