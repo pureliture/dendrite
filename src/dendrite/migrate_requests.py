@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from .transcript_capture import normalize_provider_capture_request
+from .providers.normalize import normalize_provider_capture_request
 
 
 def build_migration_request(provider: str, path: Path, *, project: str = "") -> dict:

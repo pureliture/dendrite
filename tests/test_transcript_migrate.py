@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from dendrite.transcript_migrate import (
+from dendrite.migrate_runner import (
     build_migration_request,
     default_source_roots,
     enumerate_sessions,
@@ -14,7 +14,7 @@ from dendrite.transcript_migrate import (
     migrate,
     parse_source_root_overrides,
 )
-from dendrite.transcript_source import enumerate_hermes_sessions
+from dendrite.source_adapters.hermes import enumerate_hermes_sessions
 
 
 def _make_session(root: Path, rel: str) -> Path:

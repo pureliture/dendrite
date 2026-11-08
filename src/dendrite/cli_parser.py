@@ -4,7 +4,7 @@ from __future__ import annotations
 from argparse import ArgumentParser
 
 from .providers.registry import supported_names
-from .transcript_migrate import MIGRATION_PROVIDERS
+from .migrate_runner import MIGRATION_PROVIDERS
 
 
 def build_parser() -> ArgumentParser:

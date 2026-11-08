@@ -8,16 +8,14 @@ import sys
 from pathlib import Path
 
 from .capture import capture_event
-from .provider_contracts import build_provider_doctor_report, build_provider_hook_plan
+from .providers.doctor import build_provider_doctor_report
+from .providers.hook_plan import build_provider_hook_plan
 from .source_catalog import resolve_source_ref, scan_source_catalog
-from .transcript_capture import (
-    TranscriptCaptureSpool,
-    has_workspace_path,
-    normalize_provider_capture_request,
-)
+from .capture_spool import TranscriptCaptureSpool
+from .providers.normalize import has_workspace_path, normalize_provider_capture_request
 from .transcript_drain import drain_transcript_spool_once
 from .transcript_ingest import IngressQueueClient
-from .transcript_migrate import migrate, parse_source_root_overrides
+from .migrate_runner import migrate, parse_source_root_overrides
 
 
 def best_effort_kickstart_launchagent(label: str) -> None:

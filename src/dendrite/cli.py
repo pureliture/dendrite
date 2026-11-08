@@ -13,9 +13,10 @@ from .cli_handlers import (
     transcript_migrate,
 )
 from .cli_parser import build_parser
-from .provider_contracts import build_provider_doctor_report, build_provider_hook_plan
+from .providers.doctor import build_provider_doctor_report
+from .providers.hook_plan import build_provider_hook_plan
 from .source_catalog import resolve_source_ref, scan_source_catalog
-from .transcript_capture import TranscriptCaptureSpool
+from .capture_spool import TranscriptCaptureSpool
 from .transcript_drain import drain_transcript_spool_once
 from .transcript_ingest import IngressQueueClient
 

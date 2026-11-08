@@ -8,7 +8,8 @@ from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from types import SimpleNamespace
 
-from .transcript_capture import TranscriptCaptureSpool, normalize_provider_capture_request
+from .capture_spool import TranscriptCaptureSpool
+from .providers.normalize import normalize_provider_capture_request
 
 
 RunCommand = Callable[[Sequence[str]], SimpleNamespace | subprocess.CompletedProcess]

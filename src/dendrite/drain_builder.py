@@ -5,9 +5,24 @@ import hashlib
 from bisect import bisect_left, bisect_right
 from dataclasses import dataclass
 
-from .transcript_source import MAX_TRANSCRIPT_BODY_CHARS, adapter_for
+from .providers.registry import adapter_kind_for
+from .source_adapters.jsonl_adapter import JsonlSourceAdapter, OmpJsonlSourceAdapter
+from .source_adapters.hermes import HermesSqliteSourceAdapter
+from .source_adapters.opencode import OpenCodeSqliteSourceAdapter
 
+MAX_TRANSCRIPT_BODY_CHARS = 180_000
 PARSER_VERSION = "dendrite-thin-transcript-drain.v2"
+
+
+def adapter_for(provider: str):
+    kind = adapter_kind_for(provider)
+    if kind == "hermes-sqlite":
+        return HermesSqliteSourceAdapter()
+    if kind == "opencode-sqlite":
+        return OpenCodeSqliteSourceAdapter()
+    if kind == "omp-jsonl":
+        return OmpJsonlSourceAdapter()
+    return JsonlSourceAdapter()
 
 
 @dataclass(frozen=True)

@@ -10,7 +10,7 @@ import json
 import os
 from dataclasses import asdict
 from .capture_spool import TranscriptCaptureSpool
-from .transcript_capture import validate_capture_request
+from .providers.normalize import validate_capture_request
 from .transcript_ingest import IngressQueueClient
 from .transcript_outbox import TranscriptOutbox
 from .drain_builder import PackedTranscriptDocument, build_drain_documents, queue_source

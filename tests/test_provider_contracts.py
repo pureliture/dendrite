@@ -3,11 +3,9 @@ from __future__ import annotations
 import json
 
 from dendrite.cli import main
-from dendrite.provider_contracts import (
-    build_default_provider_source_contracts,
-    build_provider_doctor_report,
-    build_provider_hook_plan,
-)
+from dendrite.providers.contracts_def import build_default_provider_source_contracts
+from dendrite.providers.doctor import build_provider_doctor_report
+from dendrite.providers.hook_plan import build_provider_hook_plan
 from dendrite.providers.contracts import no_op_hook_response, normalize_provider_event
 
 

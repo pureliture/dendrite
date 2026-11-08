@@ -6,7 +6,8 @@ from pathlib import Path
 
 from .capture_spool import TranscriptCaptureSpool
 from .providers.registry import supported_names
-from .transcript_source import enumerate_hermes_sessions, enumerate_opencode_sessions
+from .source_adapters.hermes import enumerate_hermes_sessions
+from .source_adapters.opencode import enumerate_opencode_sessions
 from .hermes_profiles import HermesProfileStore, discover_hermes_profile_stores, slug_hermes_profile
 from .migrate_requests import (
     build_grok_migration_request,
