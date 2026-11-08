@@ -10,6 +10,7 @@ import sys
 from . import __version__
 from .capture import capture_event
 from .provider_contracts import build_provider_doctor_report, build_provider_hook_plan
+from .providers.registry import supported_names
 from .source_catalog import resolve_source_ref, scan_source_catalog
 from .transcript_capture import (
     TranscriptCaptureSpool,
@@ -57,14 +58,14 @@ def build_parser() -> ArgumentParser:
     provider_subparsers.add_parser("doctor", help="print provider contract readiness")
     hook_plan = provider_subparsers.add_parser("hook-plan", help="print a non-mutating provider hook plan")
     hook_plan.add_argument(
-        "--provider", required=True, choices=["claude", "gemini", "codex", "antigravity", "hermes", "grok", "opencode"]
+        "--provider", required=True, choices=list(supported_names())
     )
     hook_plan.add_argument("--action", required=True, choices=["install", "uninstall"])
     hook_plan.add_argument("--project", default="<project>")
     hook_plan.add_argument("--capture-spool", default="<private-transcript-capture-spool>")
     capture = subparsers.add_parser("transcript-capture", help="enqueue a provider locator-only capture request")
     capture.add_argument(
-        "--provider", required=True, choices=["claude", "gemini", "codex", "antigravity", "hermes", "grok", "opencode"]
+        "--provider", required=True, choices=list(supported_names())
     )
     capture.add_argument("--project", required=True)
     capture.add_argument("--spool", required=True)

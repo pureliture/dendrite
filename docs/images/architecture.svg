@@ -1,0 +1,98 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 760" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace">
+<defs><linearGradient id="sky" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#0b1426"/><stop offset=".55" stop-color="#0e1b33"/><stop offset="1" stop-color="#0b1426"/></linearGradient><pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse"><path d="M40 0H0V40" fill="none" stroke="#ffffff" stroke-opacity=".045" stroke-width="1"/></pattern><marker id="flow" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M0 0L8 4.5L0 9z" fill="#2dd4bf"/></marker></defs>
+<rect width="1280" height="760" fill="url(#sky)"/><rect width="1280" height="760" fill="url(#grid)"/>
+<text x="56" y="58" fill="#f1f5f9" font-size="30" font-weight="700">dendrite 아키텍처 (코드베이스 실측)</text>
+<text x="58" y="84" fill="#5b6b8c" font-size="13.5">provider hook → locator-only capture → spool → bounded drain → redaction → neurons POST 18080</text>
+<g font-size="11.5" font-weight="600">
+<rect x="56" y="104" width="14" height="14" rx="3" fill="#38bdf8"/><text x="78" y="116" fill="#cbd5e1">capture / normalize</text>
+<rect x="226" y="104" width="14" height="14" rx="3" fill="#a78bfa"/><text x="248" y="116" fill="#cbd5e1">spool / outbox</text>
+<rect x="396" y="104" width="14" height="14" rx="3" fill="#34d399"/><text x="418" y="116" fill="#cbd5e1">source adapter</text>
+<rect x="570" y="104" width="14" height="14" rx="3" fill="#fbbf24"/><text x="592" y="116" fill="#cbd5e1">redaction boundary</text>
+<rect x="758" y="104" width="14" height="14" rx="3" fill="#f97316"/><text x="780" y="116" fill="#cbd5e1">ship / POST</text>
+</g>
+<!-- boundary -->
+<rect x="40" y="144" width="800" height="520" rx="14" fill="#ffffff" fill-opacity=".018" stroke="#8b9bbf" stroke-opacity=".28" stroke-dasharray="7 6"/>
+<text x="56" y="168" fill="#5b6b8c" font-size="11" font-weight="700" letter-spacing="1.5">DENDRITE · MAC THIN-CLIENT (소유)</text>
+<rect x="860" y="144" width="380" height="520" rx="14" fill="#ffffff" fill-opacity=".01" stroke="#f9730f" stroke-opacity=".55" stroke-dasharray="7 6"/>
+<text x="876" y="168" fill="#fb923c" font-size="11" font-weight="700" letter-spacing="1.5">NEURONS (소유 아님)</text>
+
+<g font-size="13" font-weight="700" fill="#e2e8f0">
+<text x="56" y="196">Provider Hooks (7종)</text>
+<text x="56" y="262">Locator-only Capture</text>
+<text x="56" y="330">Spool</text>
+<text x="56" y="402">Source Adapter</text>
+<text x="56" y="474">Redaction Boundary</text>
+<text x="56" y="546">Bounded Shipper</text>
+<text x="56" y="614">Ingress POST</text>
+</g>
+<g font-size="13" font-weight="700" fill="#f3f4f6">
+<text x="880" y="320">neurons ingress</text>
+<text x="880" y="416">TranscriptIngestWorker</text>
+<text x="880" y="526">session-memory · GC · brain</text>
+</g>
+
+<!-- provider hooks -->
+<g>
+<rect x="56" y="206" width="112" height="30" rx="7" fill="#0f2b4a" stroke="#38bdf8" stroke-width="1.5"/><text x="112" y="225" text-anchor="middle" fill="#bae6fd" font-size="13">claude</text>
+<rect x="176" y="206" width="112" height="30" rx="7" fill="#0f2b4a" stroke="#38bdf8" stroke-width="1.5"/><text x="232" y="225" text-anchor="middle" fill="#bae6fd" font-size="13">codex</text>
+<rect x="296" y="206" width="112" height="30" rx="7" fill="#0f2b4a" stroke="#38bdf8" stroke-width="1.5"/><text x="352" y="225" text-anchor="middle" fill="#bae6fd" font-size="13">gemini</text>
+<rect x="416" y="206" width="124" height="30" rx="7" fill="#0f2b4a" stroke="#38bdf8" stroke-width="1.5"/><text x="478" y="225" text-anchor="middle" fill="#bae6fd" font-size="13">antigravity</text>
+<rect x="548" y="206" width="124" height="30" rx="7" fill="#0f2b4a" stroke="#38bdf8" stroke-width="1.5"/><text x="610" y="225" text-anchor="middle" fill="#bae6fd" font-size="13">hermes</text>
+<rect x="680" y="206" width="140" height="30" rx="7" fill="#0f2b4a" stroke="#38bdf8" stroke-width="1.5"/><text x="750" y="225" text-anchor="middle" fill="#bae6fd" font-size="13">grok · opencode</text>
+</g>
+<!-- capture -->
+<g>
+<rect x="56" y="272" width="764" height="48" rx="10" fill="#101a30" stroke="#38bdf8" stroke-width="1.6"/>
+<text x="76" y="295" fill="#e0f2fe" font-size="13.5" font-weight="700">transcript_capture.py  (893L) · normalize_provider_capture_request() · providers/contracts.py</text>
+<text x="76" y="313" fill="#7c8cae" font-size="11.5">locator만 추출 · 본문 미열람 · validate_capture_request · request_id 해시 · 프로젝트 라벨</text>
+</g>
+<!-- spool -->
+<g>
+<rect x="56" y="340" width="764" height="48" rx="10" fill="#1b1335" stroke="#a78bfa" stroke-width="1.6"/>
+<text x="76" y="363" fill="#ede9fe" font-size="13.5" font-weight="700">spool.py · TranscriptCaptureSpool · JsonFileSpool</text>
+<text x="76" y="381" fill="#7c8cae" font-size="11.5">pending → processing → acked / quarantine · durable · bounded tick</text>
+</g>
+<!-- adapter -->
+<g>
+<rect x="56" y="412" width="764" height="48" rx="10" fill="#0a2b22" stroke="#34d399" stroke-width="1.6"/>
+<text x="76" y="435" fill="#d1fae5" font-size="13.5" font-weight="700">transcript_source.py  (383L) · 3개 adapter · adapter_for(provider)</text>
+<text x="76" y="453" fill="#7c8cae" font-size="11.5">JsonlSourceAdapter (codex/claude/gemini/antigravity/grok) · HermesSqliteSourceAdapter · OpenCodeSqliteSourceAdapter (read-only)</text>
+</g>
+<!-- redaction -->
+<g>
+<rect x="56" y="484" width="764" height="48" rx="10" fill="#2e1f05" stroke="#fbbf24" stroke-width="1.6"/>
+<text x="76" y="507" fill="#fef3c7" font-size="13.5" font-weight="700">redaction.py · RagReadyDocument · transcript_outbox.py</text>
+<text x="76" y="525" fill="#7c8cae" font-size="11.5">token · private path · dataset_id/document_id · transcript body 차단 · public/redacted만 wire</text>
+</g>
+<!-- shipper -->
+<g>
+<rect x="56" y="556" width="764" height="48" rx="10" fill="#2b1503" stroke="#f97316" stroke-width="1.6"/>
+<text x="76" y="579" fill="#ffedd5" font-size="13.5" font-weight="700">transcript_drain.py  (531L) · drain_transcript_spool_once()</text>
+<text x="76" y="597" fill="#7c8cae" font-size="11.5">tick당 --max-items 제한 · conversation_chunk 180K자 분할 · 실패는 outbox·quarantine 재시도</text>
+</g>
+<!-- ingress -->
+<g>
+<rect x="56" y="628" width="764" height="28" rx="8" fill="#0f2b4a" stroke="#38bdf8" stroke-width="1.5"/>
+<text x="76" y="646" fill="#bae6fd" font-size="12.5" font-weight="700">transcript_ingest.py · ingress_transport.py · POST /v1/ingest/enqueue (18080)</text>
+</g>
+<!-- neurons -->
+<g>
+<rect x="876" y="288" width="348" height="62" rx="10" fill="#140d06" stroke="#fb923c" stroke-width="1.6"/>
+<text x="894" y="322" fill="#ffedd5" font-size="13.5" font-weight="700">neurons ingress</text>
+<text x="894" y="340" fill="#7c8cae" font-size="11.5">ConversationChunk 수락 · source 재해석 (CouchDB)</text>
+<rect x="876" y="384" width="348" height="62" rx="10" fill="#140d06" stroke="#fb923c" stroke-width="1.6"/>
+<text x="894" y="418" fill="#ffedd5" font-size="13.5" font-weight="700">TranscriptIngestWorker · Ledger</text>
+<text x="894" y="436" fill="#7c8cae" font-size="11.5">lane / session-memory build·promote · GC (dendrite 금지 구역)</text>
+<rect x="876" y="494" width="348" height="62" rx="10" fill="#140d06" stroke="#fb923c" stroke-width="1.6"/>
+<text x="894" y="528" fill="#ffedd5" font-size="13.5" font-weight="700">Brain query · MemoryCard · native memory</text>
+<text x="894" y="546" fill="#7c8cae" font-size="11.5">dendrite는 그 앞단 seam만 제공, authority는 neurons 소유</text>
+</g>
+<!-- arrows -->
+<g fill="none" stroke="#2dd4bf" stroke-width="2" marker-end="url(#flow)">
+<path d="M438 236 V270"/><path d="M438 322 V338"/><path d="M438 390 V410"/><path d="M438 462 V482"/><path d="M438 534 V554"/><path d="M438 606 V626"/>
+<path d="M820 642 H876" stroke="#f97316"/>
+</g>
+<text x="438" y="684" text-anchor="middle" fill="#5b6b8c" font-size="10.5">흐름: 위 → 아래, dendrite 내부 / 보라 = durable spool</text>
+<text x="1050" y="605" text-anchor="middle" fill="#fb923c" font-size="11">loopback POST (process boundary)</text>
+<text x="1050" y="628" text-anchor="middle" fill="#fb923c" font-size="11">dendrite가 넘기지 않는 선</text>
+</svg>

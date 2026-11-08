@@ -7,10 +7,13 @@ from pathlib import Path
 import shlex
 
 from .hermes_profiles import build_hermes_profile_readiness
+from .providers.registry import supported_names
 
 
-SUPPORTED_PROVIDERS = {"claude", "gemini", "codex", "antigravity", "hermes", "grok", "opencode"}
-SUPPORTED_HOOK_ACTIONS = {"install", "uninstall"}
+SUPPORTED_PROVIDERS = frozenset(supported_names())
+_SUPPORTED_HOOK_ACTIONS = frozenset({"install", "uninstall"})
+SUPPORTED_HOOK_ACTIONS = _SUPPORTED_HOOK_ACTIONS
+
 
 
 @dataclass(frozen=True)
@@ -56,7 +59,7 @@ class ProviderSourceContract:
 
 
 def build_default_provider_source_contracts() -> list[ProviderSourceContract]:
-    return [
+    contracts: list[ProviderSourceContract] = [
         ProviderSourceContract(
             contract_id="claude-code-stop-transcript-path.v1",
             provider="claude",
@@ -239,7 +242,35 @@ def build_default_provider_source_contracts() -> list[ProviderSourceContract]:
             ),
         ),
     ]
-
+    # oh-my-pi (omp): jsonl sessions under ~/.omp/agent/sessions/<slug>/<ts>_<ULID>.jsonl
+    if "omp" in set(supported_names()):
+        contracts.append(
+            ProviderSourceContract(
+                contract_id="omp-agent-end-session-jsonl.v1",
+                provider="omp",
+                provider_version="omp 18.16.0",
+                installed_version_evidence="pending_probe",
+                hook_event="agent_end",
+                source_locator_field="transcript_path",
+                parser_version="provider-transcript-parser.v1",
+                native_parser_status="native_parser_unverified_omp_jsonl",
+                privacy_redaction_status="privacy_redaction_unverified",
+                verification_status="source_locator_unverified",
+                source_status="source_locator_unverified",
+                hook_install_status="deferred_not_installed",
+                rollback_state="not_installed_no_runtime_rollback_needed",
+                evidence_hash="pending_operator_source_smoke",
+                redacted_evidence_ref="docs/OMP_PROVIDER.md",
+                raw_prompt_policy="locator_only_not_transcript_content",
+                unsupported_reason=(
+                    "oh-my-pi (omp) stores sessions as jsonl files under the omp agent "
+                    "sessions directory; the hook payload carries the transcript path. "
+                    "dendrite ships a conversation_chunk built by the omp jsonl adapter. "
+                    "source contract not yet operator-verified for hook install."
+                ),
+            )
+        )
+    return contracts
 
 def build_provider_doctor_report(
     contracts: list[ProviderSourceContract] | None = None,
@@ -521,7 +552,7 @@ def _provider_config_plan(
     project: str,
     capture_spool: str,
 ) -> dict:
-    if contract.provider not in {"claude", "antigravity", "grok", "opencode"}:
+    if contract.provider not in {"claude", "antigravity", "grok", "opencode", "omp"}:
         return {}
     planned_argv = _planned_argv(
         contract,
@@ -529,6 +560,32 @@ def _provider_config_plan(
         project=project,
         capture_spool=capture_spool,
     )
+    if contract.provider == "omp":
+        return {
+            "provider_config": {
+                "schema_version": "agent_knowledge_omp_hook_plan.v1",
+                "provider": "omp",
+                "action": action,
+                "config_format": "omp_extension_ts",
+                "config_scope": "omp_agent_extensions",
+                "candidate_write_targets": ["~/.omp/agent/extensions/dendrite-capture.ts"],
+                "event": contract.hook_event or "agent_end",
+                "managed_entry": {
+                    "event": contract.hook_event or "agent_end",
+                    "plugin": "dendrite-capture.ts",
+                    "hooks": [{"type": "command", "command": _shell_join(planned_argv), "timeout": 10}],
+                },
+                "merge_strategy": "add_extension_file_without_rewriting_existing_extensions",
+                "install_performed": False,
+                "provider_config_mutation_performed": False,
+                "postcheck": [
+                    "extension file parses as a valid omp extension plugin",
+                    "agent_end handler command matches the approved transcript-capture argv",
+                    "hook writes locator-only capture requests to the private capture spool",
+                    "no backend credential or transcript body is present in the extension entry",
+                ],
+            }
+        }
     if contract.provider == "claude":
         hook_entry = {
             "matcher": "",

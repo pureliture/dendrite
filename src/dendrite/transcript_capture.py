@@ -18,6 +18,7 @@ from .hermes_profiles import (
     hermes_session_hash_seed,
     state_db_for_profile,
 )
+from .providers.registry import supported_names
 from .redaction import redact_text_v2
 from .spool import JsonFileSpool
 
@@ -32,7 +33,7 @@ RAW_TRANSCRIPT_FIELDS = {
     "transcript_content",
     "turns",
 }
-SUPPORTED_TRANSCRIPT_PROVIDERS = {"claude", "gemini", "codex", "antigravity", "hermes", "grok", "opencode"}
+SUPPORTED_TRANSCRIPT_PROVIDERS = frozenset(supported_names())
 SOURCE_UNPROVEN_PROVIDERS: set[str] = set()
 # Shared pattern for provider session ids (codex, grok, …).
 SESSION_ID_PATTERN = re.compile(r"^[A-Za-z0-9_.:-]{8,160}$")
@@ -44,6 +45,11 @@ OPENCODE_DEFAULT_STATE_DB = ".local/share/opencode/opencode.db"
 OPENCODE_DB_PATH_ENV = "OPENCODE_DB_PATH"
 OPENCODE_HOME_ENV = "OPENCODE_HOME"
 OPENCODE_LOCATOR_KEYS = ("opencode_db_path", "state_db_path", "session_db_path")
+OMP_DEFAULT_AGENT_DIR = ".omp/agent"
+OMP_DIR_ENV = "PI_CODING_AGENT_DIR"
+OMP_DEFAULT_STATE_DIR = ".omp/agent/sessions"
+OMP_LOCATOR_KEYS = ("omp_state_db_path", "state_db_path", "session_db_path")
+OMP_SESSION_ID_KEYS = ("session_id", "sessionId", "sessionID")
 ANTIGRAVITY_HOME_ENV = "ANTIGRAVITY_HOME"
 ANTIGRAVITY_DEFAULT_HOME = ".gemini/antigravity-cli"
 ANTIGRAVITY_DEFAULT_CONFIG_HOME = ".gemini/config"
@@ -290,14 +296,16 @@ def normalize_provider_capture_request(provider: str, payload: dict, *, project:
 def _extract_source_locator(provider: str, payload: dict) -> str:
     if provider in SOURCE_UNPROVEN_PROVIDERS:
         return ""
-    # Hermes/Grok resolve their own locator (existence + non-symlink guard) before
-    # the generic key loop, so explicit transcript_path still gets the no-fabricated-
-    # path guarantee. Empty result means "no locator", not fall-through.
-    if provider in {"hermes", "grok", "opencode"}:
+    # Hermes/Grok/OpenCode/Omp resolve their own locator (existence +
+    # non-symlink guard) before the generic key loop, so explicit
+    # transcript_path still gets the no-fabricated-path guarantee.
+    if provider in {"hermes", "grok", "opencode", "omp"}:
         if provider == "hermes":
             locator = _resolve_hermes_session_locator(payload)
         elif provider == "opencode":
             locator = _resolve_opencode_session_locator(payload)
+        elif provider == "omp":
+            locator = _resolve_omp_session_locator(payload)
         else:
             locator = _resolve_grok_session_locator(payload)
         if locator:
@@ -394,6 +402,45 @@ def _opencode_session_id(payload: dict) -> str:
     )
 
 
+def _default_omp_sessions_dir() -> Path:
+    """Return the default oh-my-pi session directory (env override first)."""
+    explicit = os.environ.get(OMP_DIR_ENV)
+    if explicit:
+        return Path(explicit).expanduser() / "sessions"
+    return Path.home() / OMP_DEFAULT_STATE_DIR
+
+
+def _resolve_omp_session_locator(payload: dict) -> str:
+    """Resolve an oh-my-pi session file without reading it.
+
+    omp keeps one jsonl file per session under
+    ``~/.omp/agent/sessions/<slug>/<ts>_<ULID>.jsonl`` (override via
+    ``PI_CODING_AGENT_DIR``). This returns the file path only when it
+    already exists and is not a symlink; it never reads the file. An
+    absent explicit path yields an empty locator (never fabricated).
+    """
+    for key in (*OMP_LOCATOR_KEYS, "transcript_path", "transcriptPath", "source_locator", "runtime_handle"):
+        value = payload.get(key)
+        if isinstance(value, str) and value:
+            return _existing_non_symlink_store(Path(value).expanduser())
+    session_id = _omp_session_id(payload)
+    sessions_dir = _default_omp_sessions_dir()
+    if not session_id or not sessions_dir.is_dir():
+        return ""
+    for candidate in sessions_dir.glob(f"*_{session_id}.jsonl"):
+        if candidate.is_file() and not candidate.is_symlink():
+            return str(candidate)
+    return ""
+
+
+def _omp_session_id(payload: dict) -> str:
+    """oh-my-pi plugin payloads use session_id; accept camelCase too."""
+    for key in OMP_SESSION_ID_KEYS:
+        value = payload.get(key)
+        if isinstance(value, str) and value:
+            return value
+    return ""
+
 def _provider_session_id(provider: str, payload: dict) -> str:
     if provider == "antigravity":
         return str(payload.get("conversationId") or payload.get("conversation_id") or "")
@@ -401,6 +448,8 @@ def _provider_session_id(provider: str, payload: dict) -> str:
         return _grok_session_id(payload)
     if provider == "opencode":
         return _opencode_session_id(payload)
+    if provider == "omp":
+        return _omp_session_id(payload)
     return ""
 
 

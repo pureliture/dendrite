@@ -16,6 +16,9 @@ it into bounded `conversation_chunk` documents without dropping the tail.
   (`~/.local/share/opencode/opencode.db`, tables ``session_v2`` +
   ``session_message``): the adapter opens it read-only/immutable and assembles
   the requested session's user/assistant text the same way.
+- Oh-My-Pi (omp) stores sessions as jsonl files under
+  `~/.omp/agent/sessions/<slug>/<timestamp>_<ULID>.jsonl`: the adapter reads
+  the requested file and extracts only user/assistant text blocks.
 
 dendrite still does NOT do session-memory build/promote, GC, or backend work — it
 only produces a redacted transcript document, exactly as it already did for jsonl.
@@ -23,11 +26,12 @@ only produces a redacted transcript document, exactly as it already did for json
 
 from __future__ import annotations
 
+import json as _json
 import sqlite3
 from pathlib import Path
 
+from .providers.registry import adapter_kind_for
 from .redaction import redact_public_ingress_text
-
 # Per-document serialized body budget; never a limit on the source transcript.
 MAX_TRANSCRIPT_BODY_CHARS = 180_000
 # Schema per Hermes session-storage docs; tolerant to column presence. Verify
@@ -97,15 +101,40 @@ class OpenCodeSqliteSourceAdapter(TranscriptSourceAdapter):
         return redact_public_ingress_text(text)
 
 
-_DEFAULT_ADAPTER = JsonlSourceAdapter()
-_ADAPTERS: dict[str, TranscriptSourceAdapter] = {
-    "hermes": HermesSqliteSourceAdapter(),
-    "opencode": OpenCodeSqliteSourceAdapter(),
-}
+class OmpJsonlSourceAdapter(TranscriptSourceAdapter):
+    """oh-my-pi (omp): one jsonl file per session; extract only user/assistant text.
+
+    Unlike :class:`JsonlSourceAdapter` (opaque whole-file read), the omp
+    session format mixes metadata entries (``title``, ``session``,
+    ``model_change`` …) and non-conversation message roles
+    (``toolResult``, ``developer``) into the file. Only
+    ``type == "message"`` entries with ``role in {"user", "assistant"}``
+    and ``content[].type == "text"`` blocks are conversation.
+    """
+
+    def read_redacted_transcript(self, request: dict) -> str:
+        locator = request.get("source_locator") or {}
+        path = _source_path(locator.get("runtime_handle"))
+        text = _read_omp_session_text(path)
+        return redact_public_ingress_text(text)
 
 
 def adapter_for(provider: str) -> TranscriptSourceAdapter:
-    return _ADAPTERS.get(provider, _DEFAULT_ADAPTER)
+    """Return the source adapter registered for ``provider``.
+
+    Unknown providers raise ``ValueError("source_unproven")`` so the drain
+    quarantines the request. Unlike the previous behaviour, there is no
+    silent fall-back to :class:`JsonlSourceAdapter` — a provider that is
+    not in the registry must be registered explicitly.
+    """
+    kind = adapter_kind_for(provider)
+    if kind == "hermes-sqlite":
+        return HermesSqliteSourceAdapter()
+    if kind == "opencode-sqlite":
+        return OpenCodeSqliteSourceAdapter()
+    if kind == "omp-jsonl":
+        return OmpJsonlSourceAdapter()
+    return JsonlSourceAdapter()
 
 
 def _source_path(value) -> Path:
@@ -381,3 +410,41 @@ def _opencode_tool_value(value) -> str:
             return rendered if rendered.strip() else ""
         return ""
     return "\n".join(texts)
+
+
+def _read_omp_session_text(path: Path) -> str:
+    """Extract user/assistant text lines from an oh-my-pi session jsonl."""
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError as exc:
+        raise ValueError("source_unreadable") from exc
+    lines: list[str] = []
+    for raw in text.splitlines():
+        raw = raw.strip()
+        if not raw:
+            continue
+        try:
+            entry = _json.loads(raw)
+        except (TypeError, ValueError):
+            continue
+        if not isinstance(entry, dict) or entry.get("type") != "message":
+            continue
+        message = entry.get("message")
+        if not isinstance(message, dict):
+            continue
+        role = str(message.get("role") or "")
+        if role not in {"user", "assistant"}:
+            continue
+        content = message.get("content")
+        if not isinstance(content, list):
+            continue
+        for block in content:
+            if isinstance(block, str):
+                candidate = block
+            elif isinstance(block, dict) and block.get("type") == "text":
+                candidate = str(block.get("text") or "")
+            else:
+                continue
+            if candidate.strip():
+                lines.append(f"{role}: {candidate.strip()}")
+    return "\n".join(lines)

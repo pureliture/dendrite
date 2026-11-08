@@ -13,8 +13,7 @@ from dendrite.providers.contracts import no_op_hook_response, normalize_provider
 
 def test_default_provider_source_contracts_are_locator_only() -> None:
     contracts = {contract.provider: contract for contract in build_default_provider_source_contracts()}
-
-    assert set(contracts) == {"claude", "gemini", "codex", "antigravity", "hermes", "grok", "opencode"}
+    assert set(contracts) == {"claude", "gemini", "codex", "antigravity", "hermes", "grok", "opencode", "omp"}
     assert contracts["codex"].raw_prompt_policy == "locator_only_not_transcript_content"
     # The four live-smoked providers store per-session jsonl and are locator-verified.
     for name in ("claude", "gemini", "codex", "antigravity"):

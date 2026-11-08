@@ -20,6 +20,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .hermes_profiles import HermesProfileStore, discover_hermes_profile_stores, slug_hermes_profile
+from .providers.registry import supported_names
 from .transcript_capture import (
     SUPPORTED_TRANSCRIPT_PROVIDERS,
     TranscriptCaptureSpool,
@@ -27,7 +28,7 @@ from .transcript_capture import (
 )
 from .transcript_source import enumerate_hermes_sessions, enumerate_opencode_sessions
 
-MIGRATION_PROVIDERS = ("codex", "claude", "gemini", "antigravity", "hermes", "grok", "opencode")
+MIGRATION_PROVIDERS = tuple(supported_names())
 SESSION_GLOB = "**/*.jsonl"
 GROK_UPDATES_NAME = "updates.jsonl"
 
@@ -52,6 +53,7 @@ def default_source_roots() -> dict[str, Path]:
             if opencode_home
             else home / ".local" / "share" / "opencode" / "opencode.db"
         )
+    omp_sessions = Path(os.environ.get("PI_CODING_AGENT_DIR") or (home / ".omp" / "agent")) / "sessions"
     return {
         "codex": codex_home / "sessions",
         "claude": home / ".claude" / "projects",
@@ -60,6 +62,7 @@ def default_source_roots() -> dict[str, Path]:
         "hermes": hermes_root,
         "grok": grok_home / "sessions",
         "opencode": opencode_db,
+        "omp": omp_sessions,
     }
 
 
