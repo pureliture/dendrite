@@ -7,12 +7,9 @@ from pathlib import Path
 from .base import TranscriptSourceAdapter
 from .common import source_path
 from ..redaction import redact_public_ingress_text
+from ..transcript_source import readonly_wal_connection
 
 HERMES_MESSAGES_TABLE = "messages"
-
-
-def hermes_ro_uri(path: Path) -> str:
-    return f"file:{path}?mode=ro&immutable=1"
 
 
 class HermesSqliteSourceAdapter(TranscriptSourceAdapter):
@@ -31,8 +28,8 @@ def enumerate_hermes_sessions(db_path) -> list[str]:
     if not path.is_file() or path.is_symlink():
         return []
     try:
-        conn = sqlite3.connect(hermes_ro_uri(path), uri=True)
-    except sqlite3.Error:
+        conn = readonly_wal_connection(path)
+    except ValueError:
         return []
     try:
         columns = {row[1] for row in conn.execute(f"PRAGMA table_info({HERMES_MESSAGES_TABLE})")}
@@ -52,10 +49,7 @@ def enumerate_hermes_sessions(db_path) -> list[str]:
 
 
 def read_hermes_session_text(path: Path, session_id: str) -> str:
-    try:
-        conn = sqlite3.connect(hermes_ro_uri(path), uri=True)
-    except sqlite3.Error as exc:
-        raise ValueError("source_unreadable") from exc
+    conn = readonly_wal_connection(path)
     try:
         conn.row_factory = sqlite3.Row
         columns = {row["name"] for row in conn.execute(f"PRAGMA table_info({HERMES_MESSAGES_TABLE})")}
