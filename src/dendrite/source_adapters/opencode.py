@@ -7,13 +7,10 @@ from pathlib import Path
 from .base import TranscriptSourceAdapter
 from .common import source_path
 from ..redaction import redact_public_ingress_text
+from ..transcript_source import readonly_wal_connection
 
 OPENCODE_MESSAGES_TABLE = "session_message"
 OPENCODE_SESSIONS_TABLE = "session_v2"
-
-
-def opencode_ro_uri(path: Path) -> str:
-    return f"file:{path}?mode=ro&immutable=1"
 
 
 class OpenCodeSqliteSourceAdapter(TranscriptSourceAdapter):
@@ -32,8 +29,8 @@ def enumerate_opencode_sessions(db_path) -> list[str]:
     if not path.is_file() or path.is_symlink():
         return []
     try:
-        conn = sqlite3.connect(opencode_ro_uri(path), uri=True)
-    except sqlite3.Error:
+        conn = readonly_wal_connection(path)
+    except ValueError:
         return []
     try:
         try:
@@ -54,10 +51,7 @@ def enumerate_opencode_sessions(db_path) -> list[str]:
 def read_opencode_session_text(path: Path, session_id: str) -> str:
     if not session_id:
         raise ValueError("source_unreadable")
-    try:
-        conn = sqlite3.connect(opencode_ro_uri(path), uri=True)
-    except sqlite3.Error as exc:
-        raise ValueError("source_unreadable") from exc
+    conn = readonly_wal_connection(path)
     try:
         conn.row_factory = sqlite3.Row
         try:
