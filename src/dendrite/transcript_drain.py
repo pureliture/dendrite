@@ -167,7 +167,7 @@ def _drain_transcript_spool_once(
                 break
         except Exception as exc:
             error_class = _classify_error(exc)
-            failure = _failure_record(error_class, claimed)
+            failure = _failure_record(error_class, claimed, message=str(exc))
             last_error_class = error_class
             if claimed.exists():
                 if _is_recoverable_error_class(error_class):

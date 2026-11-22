@@ -4,6 +4,7 @@ import json
 import re
 from dataclasses import replace
 
+from .drain_utils import failure_message
 from .ingress_transport import IngressHttpTransport
 from .rag_ingress.rag_ready_document import RagReadyDocument, build_rag_ready_document
 from .redaction import redact_public_ingress_text, redact_text_v2
@@ -169,7 +170,7 @@ def _classify_error(exc: Exception) -> str:
 def _redacted_error_message(exc: Exception) -> str:
     error_class = _classify_error(exc)
     if error_class.startswith("source_") or error_class.startswith("ingress_"):
-        return error_class
+        return failure_message(error_class, str(exc))
     return "transcript ingest failed"
 
 

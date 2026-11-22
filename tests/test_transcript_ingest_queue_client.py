@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 from types import SimpleNamespace
 import urllib.error
 
+from dendrite.redaction import redact_public_ingress_text, redact_text_v2
 from dendrite.transcript_ingest import IngressQueueClient
 
 
@@ -138,3 +140,53 @@ def test_ingress_queue_client_invalid_json_response_is_retryable(monkeypatch) ->
         assert "invalid_json" in str(exc)
     else:
         raise AssertionError("invalid ingress responses must be retryable")
+
+
+def test_ingress_queue_client_keeps_server_rejection_reason(monkeypatch) -> None:
+    """A 4xx must say *why*: status + safe exception class, never payload text."""
+
+    def fake_urlopen(_request, timeout):
+        _ = timeout
+        body = io.BytesIO(
+            json.dumps(
+                {"accepted": False, "status": "rejected", "error": "SecretLikeMetadataError"}
+            ).encode("utf-8")
+        )
+        raise urllib.error.HTTPError("http://127.0.0.1:8080/v1/ingest/enqueue", 400, "bad request", {}, body)
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+
+    try:
+        IngressQueueClient(base_url="http://127.0.0.1:8080").enqueue_document(
+            source={"producer": "test"},
+            packed=SimpleNamespace(filename="chunk.md", body="# body\n", metadata={}),
+            content_hash="sha256:" + "a" * 64,
+            target_profile="index-transcript-memory",
+            kind="conversation_chunk",
+            idempotency_key="codex:conversation_chunk:test",
+        )
+    except RuntimeError as exc:
+        assert "status=rejected" in str(exc)
+        assert "error=SecretLikeMetadataError" in str(exc)
+    else:
+        raise AssertionError("HTTP 400 must surface as a rejection")
+
+
+def test_public_redaction_output_is_a_conservative_fixed_point() -> None:
+    """The wire body must satisfy ``redact_text_v2(body) == body``.
+
+    The worker fail-closes with ``quarantined_wire_redaction`` otherwise. Public
+    term substitutions ("token" -> "credential") used to synthesize
+    credential-shaped text that the conservative pass would rewrite again.
+    """
+    raw = (
+        "---\nschema_version: agent_knowledge_document.v2\nresult_type: conversation_chunk\n---\n"
+        "Basic token handling and access token rotation were discussed.\n"
+        "postgresql://alice:hunter2xyz@db.internal:5432/app kept working.\n"
+        "Bearer token refresh and raw_transcript piping came up.\n"
+    )
+    public = redact_public_ingress_text(raw)
+    assert redact_text_v2(public) == public
+    assert redact_public_ingress_text(public) == public
+    assert "hunter2xyz" not in public
+    assert "alice" not in public
