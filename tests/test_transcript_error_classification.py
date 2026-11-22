@@ -36,3 +36,19 @@ def test_quarantine_record_surfaces_ingress_category_and_recoverable() -> None:
     assert rec["error_class"] == "ingress_rejected_http_503"
     assert rec["message"] == "ingress_rejected_http_503"
     assert rec["recoverable"] is True
+
+
+def test_quarantine_message_preserves_server_rejection_detail() -> None:
+    """A stored quarantine record must explain the refusal without payload text."""
+    exc = RuntimeError("ingress enqueue rejected: status=rejected error=SecretLikeMetadataError")
+    rec = _quarantine_failure_record(exc)
+    assert rec["error_class"] == "ingress_rejected"
+    assert rec["message"] == "ingress_rejected; status=rejected error=SecretLikeMetadataError"
+
+
+def test_quarantine_message_drops_unparsable_ingress_detail() -> None:
+    """Anything outside the closed ingress vocabulary collapses to the class."""
+    exc = RuntimeError("ingress enqueue rejected: transcript body text that must not be stored")
+    rec = _quarantine_failure_record(exc)
+    assert rec["error_class"] == "ingress_rejected"
+    assert rec["message"] == "ingress_rejected"
