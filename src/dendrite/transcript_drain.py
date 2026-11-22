@@ -1,7 +1,8 @@
 """Thin shipper: drain locator-only capture spool to ingress.
 
-One tick is bounded by ``max_items``. Failure classification never
-re-raises transcript content; non-recoverable failures are quarantined.
+One tick is bounded by ``max_items`` items and ``max_parts_per_tick`` POSTs.
+Failure classification never re-raises transcript content; non-recoverable
+failures are quarantined.
 """
 from __future__ import annotations
 
@@ -9,6 +10,7 @@ import fcntl
 import json
 import os
 from dataclasses import asdict
+from pathlib import Path
 from .capture_spool import TranscriptCaptureSpool
 from .providers.normalize import validate_capture_request
 from .transcript_ingest import IngressQueueClient
@@ -26,6 +28,7 @@ from .drain_utils import compact_utc_timestamp as _compact_utc_timestamp
 DRAIN_SCHEMA_VERSION = "dendrite_transcript_drain_result.v1"
 PARSER_VERSION = "dendrite-thin-transcript-drain.v2"
 MAX_DELIVERY_ATTEMPTS = 8
+_DEFAULT_MAX_PARTS_PER_TICK = 300
 
 __all__ = [
     "PackedTranscriptDocument",
@@ -57,11 +60,13 @@ def drain_transcript_spool_once(
     ingress: IngressQueueClient,
     target_profile: str,
     max_items: int = 5,
+    max_parts_per_tick: int = _DEFAULT_MAX_PARTS_PER_TICK,
     requeue_recoverable_quarantine: bool = False,
 ) -> dict:
     def empty_report(**updates):
         report = _drain_transcript_spool_once(
-            capture_spool=capture_spool, ingress=ingress, target_profile=target_profile, max_items=0
+            capture_spool=capture_spool, ingress=ingress, target_profile=target_profile,
+            max_items=0, max_parts_per_tick=max_parts_per_tick,
         )
         report["recovered_processing_count"] = 0
         report.update(updates)
@@ -93,7 +98,8 @@ def drain_transcript_spool_once(
             )
         report = _drain_transcript_spool_once(
             capture_spool=capture_spool, ingress=ingress, target_profile=target_profile,
-            max_items=max_items, requeue_recoverable_quarantine=requeue_recoverable_quarantine,
+            max_items=max_items, max_parts_per_tick=max_parts_per_tick,
+            requeue_recoverable_quarantine=requeue_recoverable_quarantine,
         )
         report["recovered_processing_count"] = recovered
         report["mutation_performed"] = report["mutation_performed"] or bool(recovered)
@@ -102,9 +108,31 @@ def drain_transcript_spool_once(
         os.close(fd)
 
 
+def _with_progress_history(claimed: Path, failure: dict) -> dict:
+    """Carry the budget-deferral marker onto later real failure records."""
+    try:
+        prior = json.loads(claimed.read_text(encoding="utf-8")).get("last_failure") or {}
+    except (OSError, TypeError, ValueError):
+        return failure
+    if prior.get("budget_deferred") or prior.get("error_class") == "delivery_part_budget_exhausted":
+        failure["budget_deferred"] = True
+    return failure
+
+
+def _budget_deferral_record(claimed: Path) -> dict:
+    failure = _failure_record("delivery_part_budget_exhausted", claimed)
+    # failure_record adds one retry, but crossing ticks on budget is not a failure.
+    failure["retry_attempts"] = max(int(failure.get("retry_attempts") or 0) - 1, 0)
+    failure["recoverable"] = True
+    failure["budget_deferred"] = True
+    return failure
+
+
 def _drain_transcript_spool_once(
     *, capture_spool: TranscriptCaptureSpool, ingress: IngressQueueClient,
-    target_profile: str, max_items: int = 5, requeue_recoverable_quarantine: bool = False,
+    target_profile: str, max_items: int = 5,
+    max_parts_per_tick: int = _DEFAULT_MAX_PARTS_PER_TICK,
+    requeue_recoverable_quarantine: bool = False,
 ) -> dict:
     from .drain_utils import sha256 as _sha256
 
@@ -112,12 +140,14 @@ def _drain_transcript_spool_once(
     if requeue_recoverable_quarantine:
         requeued = capture_spool.requeue_recoverable_quarantine(max_items=max(max_items, 0))
     attempted = queued = queued_parts = delivery_pending = quarantined = retry_pending = 0
-    post_budget = max(max_items, 0)
+    part_budget = max(max_parts_per_tick, 0)
     network_used = False
     last_status = "idle"
     last_error_class = ""
 
     for _ in range(max(max_items, 0)):
+        if part_budget <= 0:
+            break
         try:
             claimed = capture_spool.claim_next()
         except FileNotFoundError:
@@ -128,11 +158,11 @@ def _drain_transcript_spool_once(
             outbox, snapshot_hash, documents, next_part = _prepare_delivery(
                 capture_spool, claimed, request, target_profile
             )
-            while next_part < len(documents) and post_budget > 0:
+            while next_part < len(documents) and part_budget > 0:
                 packed = documents[next_part]
                 content_hash = _sha256(packed.body)
                 network_used = True
-                post_budget -= 1
+                part_budget -= 1
                 enqueue = ingress.enqueue_document(
                     source=queue_source(request),
                     packed=packed,
@@ -153,21 +183,16 @@ def _drain_transcript_spool_once(
                 except OSError:
                     pass
             else:
-                attempts = capture_spool.bump_delivery_attempt(claimed)
-                if attempts >= MAX_DELIVERY_ATTEMPTS:
-                    failure = _failure_record("delivery_retry_exhausted", claimed)
-                    failure["recoverable"] = False
-                    capture_spool.quarantine_with_failure(claimed, failure)
-                    quarantined += 1
-                    last_status = "quarantined"
-                else:
-                    capture_spool.requeue_with_failure(claimed)
-                    delivery_pending += 1
-                    last_status = "delivery_pending"
+                # Budget deferral is progress, not a failure: no attempt bump
+                # and no quarantine. The marker distinguishes these requests
+                # from genuine delivery-retry exhaustion in quarantine.
+                capture_spool.requeue_with_failure(claimed, _budget_deferral_record(claimed))
+                delivery_pending += 1
+                last_status = "delivery_pending"
                 break
         except Exception as exc:
             error_class = _classify_error(exc)
-            failure = _failure_record(error_class, claimed, message=str(exc))
+            failure = _with_progress_history(claimed, _failure_record(error_class, claimed, message=str(exc)))
             last_error_class = error_class
             if claimed.exists():
                 if _is_recoverable_error_class(error_class):
@@ -187,8 +212,6 @@ def _drain_transcript_spool_once(
                 capture_spool.quarantine_with_failure(claimed, failure)
                 quarantined += 1
                 last_status = "quarantined"
-        if post_budget == 0:
-            break
 
     status = "idle"
     if retry_pending:

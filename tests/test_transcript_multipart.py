@@ -179,7 +179,8 @@ def test_post_budget_defers_capture_ack_and_survives_source_removal(tmp_path):
     spool.enqueue(request)
     ingress = RecordingIngress()
     first = drain_transcript_spool_once(
-        capture_spool=spool, ingress=ingress, target_profile="index-transcript-memory", max_items=2
+        capture_spool=spool, ingress=ingress, target_profile="index-transcript-memory", max_items=2,
+        max_parts_per_tick=2,
     )
     assert len(ingress.calls) == 2
     assert first["queued_part_count"] == 2
@@ -202,7 +203,7 @@ def test_post_budget_defers_capture_ack_and_survives_source_removal(tmp_path):
         before = len(ingress.calls)
         report = drain_transcript_spool_once(
             capture_spool=TranscriptCaptureSpool(spool.root), ingress=ingress,
-            target_profile="index-transcript-memory", max_items=2,
+            target_profile="index-transcript-memory", max_items=2, max_parts_per_tick=2,
         )
         assert len(ingress.calls) - before <= 2
         if report["queued_count"]:
@@ -341,7 +342,8 @@ def test_bad_resume_state_is_not_acknowledged_or_sent(tmp_path, corruption):
     spool.enqueue(_request(source))
     ingress = RecordingIngress()
     drain_transcript_spool_once(
-        capture_spool=spool, ingress=ingress, target_profile="index-transcript-memory", max_items=1
+        capture_spool=spool, ingress=ingress, target_profile="index-transcript-memory", max_items=1,
+        max_parts_per_tick=1,
     )
     snapshot = next((spool.root / "outbox/snapshots").glob("*.json"))
     pending = next((spool.root / "pending").glob("*.json"))
@@ -401,7 +403,8 @@ def test_interrupted_processing_is_recovered_under_the_drain_lock(tmp_path):
     spool.enqueue(_request(source))
     ingress = RecordingIngress()
     drain_transcript_spool_once(
-        capture_spool=spool, ingress=ingress, target_profile="index-transcript-memory", max_items=1
+        capture_spool=spool, ingress=ingress, target_profile="index-transcript-memory", max_items=1,
+        max_parts_per_tick=1,
     )
     spool.claim_next()  # Simulate a process dying after claiming the partial capture.
     source.unlink()

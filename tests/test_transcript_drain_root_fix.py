@@ -53,7 +53,7 @@ def test_files_order_is_oldest_first_not_lexicographic(tmp_path: Path) -> None:
     assert [p.name for p in spool.files("pending")] == ["req_zzz.json", "req_aaa.json"]
 
 
-def test_multipart_retry_cap_quarantines_instead_of_looping_forever(tmp_path: Path, monkeypatch) -> None:
+def test_multipart_part_budget_defers_instead_of_quarantining(tmp_path: Path, monkeypatch) -> None:
     capture = _capture_spool(tmp_path)
     pending_dir = capture.root / "pending"
     pending_dir.mkdir(parents=True, exist_ok=True)
@@ -94,13 +94,19 @@ def test_multipart_retry_cap_quarantines_instead_of_looping_forever(tmp_path: Pa
             return {"status": "queued"}
 
     report = _drain_transcript_spool_once(
-        capture_spool=capture, ingress=_Ingress(), target_profile="p", max_items=1
+        capture_spool=capture, ingress=_Ingress(), target_profile="p",
+        max_items=1, max_parts_per_tick=1,
     )
 
-    assert report["quarantined_count"] == 1
-    assert not path.exists()
-    quarantined = list((capture.root / "quarantine").glob("*.json"))
-    assert quarantined
-    failure = json.loads(quarantined[0].read_text(encoding="utf-8"))["last_failure"]
-    assert failure["error_class"] == "delivery_retry_exhausted"
-    assert failure["recoverable"] is False
+    assert report["delivery_pending_count"] == 1
+    assert report["queued_part_count"] == 1
+    assert report["quarantined_count"] == 0
+    assert not list((capture.root / "quarantine").glob("*.json"))
+    pending = next((capture.root / "pending").glob("*.json"))
+    data = json.loads(pending.read_text(encoding="utf-8"))
+    failure = data["last_failure"]
+    assert failure["error_class"] == "delivery_part_budget_exhausted"
+    assert failure["recoverable"] is True
+    assert failure["budget_deferred"] is True
+    assert failure["retry_attempts"] == 0
+    assert data["delivery"]["attempts"] == MAX_DELIVERY_ATTEMPTS - 1
