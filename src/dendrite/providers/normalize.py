@@ -29,6 +29,9 @@ from .registry import supported_names
 
 CAPTURE_SCHEMA_VERSION = "agent_knowledge_capture_request.v1"
 MAX_LOCATOR_CHARS = 4096
+LEGACY_CAPABILITY_ALIASES = {
+    "hook_called_ragflow": "hook_called_backend",
+}
 RAW_TRANSCRIPT_FIELDS = {
     "conversation",
     "messages",
@@ -325,7 +328,28 @@ def capture_event_type(provider: str, payload: dict) -> str:
     return str(payload.get("event_type") or "session_end")
 
 
+def normalize_legacy_capture_request(request: dict) -> dict:
+    """Return a canonical view of a legacy capture request.
+
+    Legacy agent-knowledge emitters used ``hook_called_ragflow`` and omitted
+    ``session_id``. Supply the current capability key and a non-identifying
+    empty session id so old spool records stay replayable.
+    """
+    normalized = dict(request)
+    capabilities = normalized.get("capabilities")
+    if isinstance(capabilities, dict):
+        canonical = dict(capabilities)
+        for old_key, current_key in LEGACY_CAPABILITY_ALIASES.items():
+            if old_key in canonical and current_key not in canonical:
+                canonical[current_key] = canonical[old_key]
+        normalized["capabilities"] = canonical
+    if "session_id" not in normalized:
+        normalized["session_id"] = ""
+    return normalized
+
+
 def validate_capture_request(request: dict) -> dict:
+    request = normalize_legacy_capture_request(request)
     required = {
         "schema_version", "request_id", "provider", "project", "event_type",
         "session_id_hash", "source_locator", "redaction_version", "privacy_level", "content_policy",
