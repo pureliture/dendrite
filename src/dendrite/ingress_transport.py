@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -64,11 +65,11 @@ class IngressHttpTransport:
             if exc.code in RETRYABLE_HTTP_STATUS_CODES:
                 raise IngressEnqueueUnreachable(f"ingress enqueue failed: unreachable http_{exc.code}") from exc
             if 400 <= exc.code < 500:
-                rejection_status = None
+                rejection_detail = None
                 if exc.code in SAFE_REJECTION_HTTP_STATUS_CODES:
-                    rejection_status = _safe_http_error_rejection_status(exc)
-                if rejection_status is not None:
-                    raise IngressEnqueueRejected(f"ingress enqueue rejected: {rejection_status}") from exc
+                    rejection_detail = _safe_http_error_rejection_detail(exc)
+                if rejection_detail is not None:
+                    raise IngressEnqueueRejected(f"ingress enqueue rejected: {rejection_detail}") from exc
                 raise IngressEnqueueUnreachable(f"ingress enqueue failed: unreachable http_{exc.code}") from exc
             raise IngressEnqueueUnreachable(f"ingress enqueue failed: unreachable http_{exc.code}") from exc
         except (urllib.error.URLError, TimeoutError, ConnectionError) as exc:
@@ -76,7 +77,9 @@ class IngressHttpTransport:
         if response_payload.get("accepted") is not True:
             status = str(response_payload.get("status") or "rejected")
             if status in SAFE_REJECTION_STATUSES:
-                raise IngressEnqueueRejected(f"ingress enqueue rejected: {status}")
+                raise IngressEnqueueRejected(
+                    f"ingress enqueue rejected: {_rejection_detail(status, response_payload.get('error'))}"
+                )
             raise IngressEnqueueUnreachable(f"ingress enqueue failed: unreachable {status}")
         return {
             "job_id": str(response_payload.get("jobId") or response_payload.get("job_id") or ""),
@@ -94,7 +97,14 @@ def _read_json_response(body: str) -> dict:
     return payload
 
 
-def _safe_http_error_rejection_status(exc: urllib.error.HTTPError) -> str | None:
+def _rejection_detail(status: str, error: object) -> str:
+    detail = f"status={status}"
+    if isinstance(error, str) and re.fullmatch(r"[A-Za-z0-9_]{1,64}", error):
+        detail += f" error={error}"
+    return detail
+
+
+def _safe_http_error_rejection_detail(exc: urllib.error.HTTPError) -> str | None:
     try:
         body = exc.read().decode("utf-8")
         payload = json.loads(body or "{}")
@@ -104,5 +114,5 @@ def _safe_http_error_rejection_status(exc: urllib.error.HTTPError) -> str | None
         return None
     status = str(payload.get("status") or payload.get("reason") or "")
     if status in SAFE_REJECTION_STATUSES:
-        return status
+        return _rejection_detail(status, payload.get("error"))
     return None
